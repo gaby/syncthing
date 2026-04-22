@@ -3344,6 +3344,53 @@ func TestRenameSameFile(t *testing.T) {
 	}
 }
 
+func TestFindRenameDoesNotReuseConsumedSource(t *testing.T) {
+	wcfg, fcfg := newDefaultCfgWrapper(t)
+	m := setupModel(t, wcfg)
+	defer cleanupModel(m)
+
+	ffs := fcfg.Filesystem()
+	writeFile(t, ffs, "a", []byte("same"))
+	writeFile(t, ffs, "b", []byte("same"))
+
+	m.ScanFolders()
+
+	must(t, ffs.Rename("a", "x"))
+	must(t, osutil.Copy(fs.CopyRangeMethodStandard, ffs, ffs, "x", "y"))
+
+	runner, ok := m.folderRunners.Get(fcfg.ID)
+	if !ok {
+		t.Fatal("folder runner missing")
+	}
+	sf := runner.(*sendReceiveFolder).folder
+
+	probe, ok, err := m.model.CurrentFolderFile(fcfg.ID, "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("source file missing in db")
+	}
+
+	used := make(map[string]struct{})
+
+	firstProbe := probe
+	firstProbe.Name = "x"
+	nf, found := sf.findRename(t.Context(), firstProbe, used)
+	if !found {
+		t.Fatal("expected rename source for x")
+	}
+	if nf.Name != "a" {
+		t.Fatalf("expected a as rename source, got %q", nf.Name)
+	}
+
+	secondProbe := probe
+	secondProbe.Name = "y"
+	if _, found := sf.findRename(t.Context(), secondProbe, used); found {
+		t.Fatal("rename source was reused for a second destination")
+	}
+}
+
 func TestBlockListMap(t *testing.T) {
 	wcfg, fcfg := newDefaultCfgWrapper(t)
 	m := setupModel(t, wcfg)

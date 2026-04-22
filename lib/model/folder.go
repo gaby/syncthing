@@ -680,6 +680,9 @@ func (f *folder) scanSubdirsChangedAndNew(ctx context.Context, subDirs []string,
 		fchan = scanner.Walk(scanCtx, scanConfig)
 	}
 
+	// Tracks names participating in successful rename detection within the
+	// current update batch. We intentionally don't track every scanned file,
+	// only consumed rename sources and destinations.
 	alreadyUsedOrExisting := make(map[string]struct{})
 	for res := range fchan {
 		if res.Err != nil {
@@ -687,6 +690,7 @@ func (f *folder) scanSubdirsChangedAndNew(ctx context.Context, subDirs []string,
 			continue
 		}
 
+		flushRenameTracking := batch.updateBatch.Full()
 		if err := batch.FlushIfFull(); err != nil {
 			// Prevent a race between the scan aborting due to context
 			// cancellation and releasing the snapshot in defer here.
@@ -694,6 +698,12 @@ func (f *folder) scanSubdirsChangedAndNew(ctx context.Context, subDirs []string,
 			for range fchan {
 			}
 			return changes, err
+		}
+		if flushRenameTracking {
+			// Rename tracking only needs to deduplicate source/destination use
+			// while updates are buffered. Once flushed, persisted state keeps
+			// rename source consumption correct, so we can safely reset.
+			clear(alreadyUsedOrExisting)
 		}
 
 		if ok, err := batch.Update(res.File); err != nil {
@@ -899,7 +909,6 @@ loop:
 		}
 
 		if fi.Name == file.Name {
-			alreadyUsedOrExisting[fi.Name] = struct{}{}
 			continue
 		}
 
@@ -922,8 +931,6 @@ loop:
 			continue
 		}
 
-		alreadyUsedOrExisting[fi.Name] = struct{}{}
-
 		if !osutil.IsDeleted(f.mtimefs, fi.Name) {
 			continue
 		}
@@ -935,6 +942,8 @@ loop:
 		}
 		nf.SetDeleted(f.shortID)
 		nf.LocalFlags = f.localFlags
+		alreadyUsedOrExisting[fi.Name] = struct{}{}
+		alreadyUsedOrExisting[file.Name] = struct{}{}
 		found = true
 		break
 	}
