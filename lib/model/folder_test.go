@@ -213,9 +213,15 @@ func TestScanErrorRetention(t *testing.T) {
 
 	errs := f.Errors()
 	truncationMsgs := 0
-	for _, fe := range errs {
+	for i, fe := range errs {
 		if strings.Contains(fe.Err, "truncated") {
 			truncationMsgs++
+			if i != 0 {
+				t.Fatalf("expected truncation indicator first, got index %d", i)
+			}
+			if fe.Path != "~truncated~" {
+				t.Fatalf("unexpected truncation indicator path %q", fe.Path)
+			}
 		}
 	}
 	if truncationMsgs != 1 {
@@ -243,6 +249,34 @@ func TestClearScanErrorsResetsRetentionState(t *testing.T) {
 	for _, fe := range f.Errors() {
 		if strings.Contains(fe.Err, "truncated") {
 			t.Fatalf("unexpected truncation indicator after full clear: %q", fe.Err)
+		}
+	}
+}
+
+func TestClearScanErrorsSelectiveClearResetsRetentionStateWhenAllRetainedErrorsAreRemoved(t *testing.T) {
+	f := &folder{
+		sl: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	for i := 0; i < maxRetainedScanErrors+3; i++ {
+		f.newScanError(fmt.Sprintf("dir/path-%03d", i), errors.New("scan failed"))
+	}
+
+	if got := f.scanErrorsDropped; got != 3 {
+		t.Fatalf("dropped %d scan errors before selective clear, expected 3", got)
+	}
+
+	f.clearScanErrors([]string{"dir"})
+
+	if len(f.scanErrors) != 0 {
+		t.Fatalf("expected no scan errors after selective clear, got %d", len(f.scanErrors))
+	}
+	if f.scanErrorsDropped != 0 {
+		t.Fatalf("expected dropped count reset after selective clear removed all retained errors, got %d", f.scanErrorsDropped)
+	}
+	for _, fe := range f.Errors() {
+		if strings.Contains(fe.Err, "truncated") {
+			t.Fatalf("unexpected truncation indicator after selective clear removed all retained errors: %q", fe.Err)
 		}
 	}
 }

@@ -1231,6 +1231,9 @@ outer:
 		filtered = append(filtered, fe)
 	}
 	f.scanErrors = filtered
+	if len(f.scanErrors) == 0 {
+		f.scanErrorsDropped = 0
+	}
 }
 
 func (f *folder) Errors() []FileError {
@@ -1239,16 +1242,16 @@ func (f *folder) Errors() []FileError {
 	scanLen := len(f.scanErrors)
 	errors := make([]FileError, 0, scanLen+len(f.pullErrors)+1)
 	errors = append(errors, f.scanErrors...)
-	if f.scanErrorsDropped > 0 {
-		errors = append(errors, FileError{
-			Path: "~truncated~",
-			Err:  fmt.Sprintf("scan error list truncated, showing latest %d entries (%d older errors omitted)", scanLen, f.scanErrorsDropped),
-		})
-	}
 	errors = append(errors, f.pullErrors...)
 	slices.SortFunc(errors, func(a, b FileError) int {
 		return strings.Compare(a.Path, b.Path)
 	})
+	if f.scanErrorsDropped > 0 && scanLen > 0 {
+		errors = append([]FileError{{
+			Path: "~truncated~",
+			Err:  fmt.Sprintf("scan error list truncated, showing latest %d entries (%d older errors omitted)", scanLen, f.scanErrorsDropped),
+		}}, errors...)
+	}
 	return errors
 }
 
