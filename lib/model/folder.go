@@ -1246,7 +1246,7 @@ func (f *folder) Errors() []FileError {
 	slices.SortFunc(errors, func(a, b FileError) int {
 		return strings.Compare(a.Path, b.Path)
 	})
-	if f.scanErrorsDropped > 0 && scanLen > 0 {
+	if f.scanErrorsDropped > 0 {
 		errors = append([]FileError{{
 			Path: "~truncated~",
 			Err:  fmt.Sprintf("scan error list truncated, showing latest %d entries (%d older errors omitted)", scanLen, f.scanErrorsDropped),
