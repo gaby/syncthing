@@ -7,8 +7,12 @@
 package model
 
 import (
+	"errors"
+	"fmt"
+	"log/slog"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/d4l3k/messagediff"
@@ -181,5 +185,63 @@ func TestSetPlatformData(t *testing.T) {
 
 	if err := sr.setPlatformData(fi, "file.tmp"); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestScanErrorRetention(t *testing.T) {
+	f := &folder{
+		sl: slog.Default(),
+	}
+
+	for i := 0; i < maxRetainedScanErrors+7; i++ {
+		f.newScanError(fmt.Sprintf("path-%03d", i), errors.New("scan failed"))
+	}
+
+	if got := len(f.scanErrors); got != maxRetainedScanErrors {
+		t.Fatalf("retained %d scan errors, expected %d", got, maxRetainedScanErrors)
+	}
+	if got := f.scanErrorsDropped; got != 7 {
+		t.Fatalf("dropped %d scan errors, expected 7", got)
+	}
+	if got := f.scanErrors[0].Path; got != "path-007" {
+		t.Fatalf("oldest retained path is %q, expected path-007", got)
+	}
+	if got := f.scanErrors[len(f.scanErrors)-1].Path; got != fmt.Sprintf("path-%03d", maxRetainedScanErrors+6) {
+		t.Fatalf("newest retained path is %q", got)
+	}
+
+	errs := f.Errors()
+	truncationMsgs := 0
+	for _, fe := range errs {
+		if strings.Contains(fe.Err, "truncated") {
+			truncationMsgs++
+		}
+	}
+	if truncationMsgs != 1 {
+		t.Fatalf("expected one truncation indicator, got %d", truncationMsgs)
+	}
+}
+
+func TestClearScanErrorsResetsRetentionState(t *testing.T) {
+	f := &folder{
+		sl: slog.Default(),
+	}
+
+	for i := 0; i < maxRetainedScanErrors+3; i++ {
+		f.newScanError(fmt.Sprintf("path-%03d", i), errors.New("scan failed"))
+	}
+
+	f.clearScanErrors(nil)
+
+	if len(f.scanErrors) != 0 {
+		t.Fatalf("expected no scan errors after full clear, got %d", len(f.scanErrors))
+	}
+	if f.scanErrorsDropped != 0 {
+		t.Fatalf("expected dropped count reset after full clear, got %d", f.scanErrorsDropped)
+	}
+	for _, fe := range f.Errors() {
+		if strings.Contains(fe.Err, "truncated") {
+			t.Fatalf("unexpected truncation indicator after full clear: %q", fe.Err)
+		}
 	}
 }

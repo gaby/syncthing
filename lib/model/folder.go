@@ -40,6 +40,9 @@ import (
 // Arbitrary limit that triggers a warning on kqueue systems
 const kqueueItemCountThreshold = 10000
 
+// Maximum number of scan errors retained per folder.
+const maxRetainedScanErrors = 100
+
 type folder struct {
 	stateTracker
 	config.FolderConfiguration
@@ -71,8 +74,10 @@ type folder struct {
 	pullFailTimer *time.Timer
 
 	scanErrors []FileError
-	pullErrors []FileError
-	errorsMut  sync.Mutex
+	// Number of scan errors dropped due to retention limits.
+	scanErrorsDropped int
+	pullErrors        []FileError
+	errorsMut         sync.Mutex
 
 	doInSyncChan chan syncRequest
 
@@ -1199,6 +1204,12 @@ func (f *folder) newScanError(path string, err error) {
 		Err:  err.Error(),
 		Path: path,
 	})
+	if dropped := len(f.scanErrors) - maxRetainedScanErrors; dropped > 0 {
+		trimmed := make([]FileError, maxRetainedScanErrors)
+		copy(trimmed, f.scanErrors[dropped:])
+		f.scanErrors = trimmed
+		f.scanErrorsDropped += dropped
+	}
 	f.errorsMut.Unlock()
 }
 
@@ -1207,6 +1218,7 @@ func (f *folder) clearScanErrors(subDirs []string) {
 	defer f.errorsMut.Unlock()
 	if len(subDirs) == 0 {
 		f.scanErrors = nil
+		f.scanErrorsDropped = 0
 		return
 	}
 	filtered := f.scanErrors[:0]
@@ -1226,9 +1238,14 @@ func (f *folder) Errors() []FileError {
 	f.errorsMut.Lock()
 	defer f.errorsMut.Unlock()
 	scanLen := len(f.scanErrors)
-	errors := make([]FileError, scanLen+len(f.pullErrors))
-	copy(errors[:scanLen], f.scanErrors)
-	copy(errors[scanLen:], f.pullErrors)
+	errors := make([]FileError, 0, scanLen+len(f.pullErrors)+1)
+	errors = append(errors, f.scanErrors...)
+	if f.scanErrorsDropped > 0 {
+		errors = append(errors, FileError{
+			Err: fmt.Sprintf("scan error list truncated, showing latest %d entries (%d older errors omitted)", maxRetainedScanErrors, f.scanErrorsDropped),
+		})
+	}
+	errors = append(errors, f.pullErrors...)
 	slices.SortFunc(errors, func(a, b FileError) int {
 		return strings.Compare(a.Path, b.Path)
 	})
