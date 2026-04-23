@@ -9,6 +9,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"path/filepath"
 	"slices"
@@ -190,7 +191,7 @@ func TestSetPlatformData(t *testing.T) {
 
 func TestScanErrorRetention(t *testing.T) {
 	f := &folder{
-		sl: slog.Default(),
+		sl: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
 	for i := 0; i < maxRetainedScanErrors+7; i++ {
@@ -224,7 +225,7 @@ func TestScanErrorRetention(t *testing.T) {
 
 func TestClearScanErrorsResetsRetentionState(t *testing.T) {
 	f := &folder{
-		sl: slog.Default(),
+		sl: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
 	for i := 0; i < maxRetainedScanErrors+3; i++ {

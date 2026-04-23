@@ -1205,9 +1205,8 @@ func (f *folder) newScanError(path string, err error) {
 		Path: path,
 	})
 	if dropped := len(f.scanErrors) - maxRetainedScanErrors; dropped > 0 {
-		trimmed := make([]FileError, maxRetainedScanErrors)
-		copy(trimmed, f.scanErrors[dropped:])
-		f.scanErrors = trimmed
+		copy(f.scanErrors, f.scanErrors[dropped:])
+		f.scanErrors = f.scanErrors[:maxRetainedScanErrors]
 		f.scanErrorsDropped += dropped
 	}
 	f.errorsMut.Unlock()
@@ -1242,7 +1241,8 @@ func (f *folder) Errors() []FileError {
 	errors = append(errors, f.scanErrors...)
 	if f.scanErrorsDropped > 0 {
 		errors = append(errors, FileError{
-			Err: fmt.Sprintf("scan error list truncated, showing latest %d entries (%d older errors omitted)", maxRetainedScanErrors, f.scanErrorsDropped),
+			Path: "~truncated~",
+			Err:  fmt.Sprintf("scan error list truncated, showing latest %d entries (%d older errors omitted)", scanLen, f.scanErrorsDropped),
 		})
 	}
 	errors = append(errors, f.pullErrors...)
