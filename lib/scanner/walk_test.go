@@ -17,8 +17,10 @@ import (
 	"path/filepath"
 	rdebug "runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/d4l3k/messagediff"
 	"golang.org/x/text/unicode/norm"
@@ -151,6 +153,31 @@ func TestWalk(t *testing.T) {
 	if diff, equal := messagediff.PrettyDiff(testdata, files); !equal {
 		t.Errorf("Walk returned unexpected data. Diff:\n%s", diff)
 		t.Error(testdata[4], files[4])
+	}
+}
+
+func TestWalkParallelParity(t *testing.T) {
+	testFs := newTestFs()
+	ignores := ignore.New(testFs, ignore.WithCache(true))
+	if err := ignores.Load(".stignore"); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, cancel := testConfig()
+	defer cancel()
+	cfg.Filesystem = testFs
+	cfg.Matcher = ignores
+
+	serialCfg := cfg
+	serialCfg.Walkers = 1
+	parallelCfg := cfg
+	parallelCfg.Walkers = 8
+
+	serial := collectScanResults(context.Background(), serialCfg)
+	parallel := collectScanResults(context.Background(), parallelCfg)
+
+	if diff, equal := messagediff.PrettyDiff(serial, parallel); !equal {
+		t.Fatalf("serial and parallel walks differ:\n%s", diff)
 	}
 }
 
@@ -726,6 +753,36 @@ func TestStopWalk(t *testing.T) {
 	}
 }
 
+func TestWalkParallelCancel(t *testing.T) {
+	fsys := fs.NewFilesystem(fs.FilesystemTypeFake, rand.String(32))
+	for i := 0; i < 20; i++ {
+		for j := 0; j < 200; j++ {
+			dir := filepath.Join("root", "d"+strconv.Itoa(i), "n"+strconv.Itoa(j))
+			if err := fsys.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if fd, err := fsys.Create(filepath.Join(dir, "f")); err != nil {
+				t.Fatal(err)
+			} else {
+				fd.Close()
+			}
+		}
+	}
+
+	cfg, cfgCancel := testConfig()
+	defer cfgCancel()
+	cfg.Filesystem = fsys
+	cfg.Walkers = 8
+	cfg.ProgressTickIntervalS = -1
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := Walk(ctx, cfg)
+	time.AfterFunc(5*time.Millisecond, cancel)
+
+	for range ch {
+	}
+}
+
 func TestIssue4799(t *testing.T) {
 	fs := fs.NewFilesystem(fs.FilesystemTypeFake, rand.String(16))
 
@@ -882,6 +939,48 @@ func TestSkipIgnoredDirs(t *testing.T) {
 	}
 }
 
+func TestSkipIgnoredDirsWithNegation(t *testing.T) {
+	fss := fs.NewFilesystem(fs.FilesystemTypeFake, "")
+	if err := fss.MkdirAll("foo/ignored/child", 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if fd, err := fss.Create("foo/ignored/child/keep.txt"); err != nil {
+		t.Fatal(err)
+	} else {
+		fd.Close()
+	}
+	if fd, err := fss.Create("foo/ignored/drop.txt"); err != nil {
+		t.Fatal(err)
+	} else {
+		fd.Close()
+	}
+
+	pats := ignore.New(fss, ignore.WithCache(true))
+	stignore := `
+	!keep.txt
+	*
+	`
+	if err := pats.Parse(bytes.NewBufferString(stignore), ".stignore"); err != nil {
+		t.Fatal(err)
+	}
+
+	files := walkDir(fss, ".", nil, pats, 0)
+	var names []string
+	for _, f := range files {
+		names = append(names, f.Name)
+	}
+
+	expected := []string{
+		"foo",
+		"foo/ignored",
+		"foo/ignored/child",
+		"foo/ignored/child/keep.txt",
+	}
+	if diff, equal := messagediff.PrettyDiff(expected, names); !equal {
+		t.Fatalf("unexpected walk results:\n%s", diff)
+	}
+}
+
 // https://github.com/syncthing/syncthing/issues/6487
 func TestIncludedSubdir(t *testing.T) {
 	fss := fs.NewFilesystem(fs.FilesystemTypeFake, "")
@@ -996,4 +1095,69 @@ func BenchmarkWalk(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		walkDir(testFs, "/", nil, nil, 0)
 	}
+}
+
+func BenchmarkWalkSynthetic(b *testing.B) {
+	buildSyntheticTree := func(fsys fs.Filesystem, levels, width, files int) {
+		queue := []string{"tree"}
+		for depth := 0; depth < levels; depth++ {
+			var next []string
+			for _, dir := range queue {
+				if err := fsys.MkdirAll(dir, 0o755); err != nil {
+					b.Fatal(err)
+				}
+				for i := 0; i < files; i++ {
+					if fd, err := fsys.Create(filepath.Join(dir, fmt.Sprintf("f%d.dat", i))); err != nil {
+						b.Fatal(err)
+					} else {
+						fd.Close()
+					}
+				}
+				for i := 0; i < width; i++ {
+					next = append(next, filepath.Join(dir, fmt.Sprintf("d%d", i)))
+				}
+			}
+			queue = next
+		}
+	}
+
+	for _, tc := range []struct {
+		name          string
+		levels, width int
+		files         int
+	}{
+		{name: "wide", levels: 3, width: 24, files: 8},
+		{name: "deep", levels: 8, width: 3, files: 4},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			for _, workers := range []int{1, defaultWalkWorkers} {
+				b.Run(fmt.Sprintf("walkers-%d", workers), func(b *testing.B) {
+					testFs := fs.NewFilesystem(fs.FilesystemTypeFake, rand.String(32))
+					buildSyntheticTree(testFs, tc.levels, tc.width, tc.files)
+					cfg, cancel := testConfig()
+					defer cancel()
+					cfg.Filesystem = testFs
+					cfg.Walkers = workers
+
+					b.ReportAllocs()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						for range Walk(context.Background(), cfg) {
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func collectScanResults(ctx context.Context, cfg Config) []protocol.FileInfo {
+	var files []protocol.FileInfo
+	for res := range Walk(ctx, cfg) {
+		if res.Err == nil {
+			files = append(files, res.File)
+		}
+	}
+	slices.SortFunc(fileList(files), compareByName)
+	return files
 }
