@@ -12,7 +12,8 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"strings"
+	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -67,6 +68,8 @@ type Config struct {
 	ScanXattrs bool
 	// Filter for extended attributes
 	XattrFilter XattrFilter
+	// Number of directory traversal workers. Zero or negative means default.
+	Walkers int
 }
 
 type CurrentFiler interface {
@@ -241,27 +244,169 @@ func (w *walker) walkWithoutHashing(ctx context.Context) chan ScanResult {
 }
 
 const walkFailureEventDesc = "Unexpected error while walking the filesystem during scan"
+const defaultWalkWorkers = 4
 
 func (w *walker) scan(ctx context.Context, toHashChan chan<- protocol.FileInfo, finishedChan chan<- ScanResult) {
 	hashFiles := w.walkAndHashFiles(ctx, toHashChan, finishedChan)
+	defer close(toHashChan)
+
+	var starts []string
 	if len(w.Subs) == 0 {
-		if err := w.Filesystem.Walk(".", hashFiles); isWarnableError(err) {
-			w.EventLogger.Log(events.Failure, walkFailureEventDesc)
-			slog.ErrorContext(ctx, "Aborted scan due to an unexpected error", slogutil.Error(err))
-		}
+		starts = []string{"."}
 	} else {
 		for _, sub := range w.Subs {
 			if err := osutil.TraversesSymlink(w.Filesystem, filepath.Dir(sub)); err != nil {
 				l.Debugf("%v: Skip walking %v as it is below a symlink", w, sub)
 				continue
 			}
-			if err := w.Filesystem.Walk(sub, hashFiles); isWarnableError(err) {
-				w.EventLogger.Log(events.Failure, walkFailureEventDesc)
-				slog.ErrorContext(ctx, "Aborted scan due to an unexpected error", slogutil.FilePath(sub), slogutil.Error(err))
-			}
+			starts = append(starts, sub)
 		}
 	}
-	close(toHashChan)
+
+	if err := w.walkWithScheduler(ctx, starts, hashFiles); isWarnableError(err) {
+		w.EventLogger.Log(events.Failure, walkFailureEventDesc)
+		slog.ErrorContext(ctx, "Aborted scan due to an unexpected error", slogutil.Error(err))
+	}
+}
+
+func (w *walker) walkWithScheduler(ctx context.Context, starts []string, hashFiles fs.WalkFunc) error {
+	if len(starts) == 0 {
+		return nil
+	}
+
+	workers := w.Walkers
+	if workers <= 0 {
+		workers = defaultWalkWorkers
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	type walkJob struct {
+		path         string
+		info         fs.FileInfo
+		callbackDone bool
+	}
+
+	workBuf := workers * 2
+	if workBuf < 4096 {
+		workBuf = 4096
+	}
+	workCh := make(chan walkJob, workBuf)
+	var pending sync.WaitGroup
+	var run sync.WaitGroup
+	var firstErr error
+	var firstErrMut sync.Mutex
+
+	setFirstErr := func(err error) {
+		if err == nil {
+			return
+		}
+		firstErrMut.Lock()
+		defer firstErrMut.Unlock()
+		if firstErr == nil {
+			firstErr = err
+			cancel()
+		}
+	}
+
+	enqueue := func(job walkJob) bool {
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+		}
+		pending.Add(1)
+		select {
+		case workCh <- job:
+			return true
+		case <-ctx.Done():
+			pending.Done()
+			return false
+		}
+	}
+
+	process := func(job walkJob) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		path := job.path
+		info := job.info
+		if !job.callbackDone {
+			var err error
+			info, err = w.Filesystem.Lstat(path)
+			if err != nil {
+				return hashFiles(path, nil, err)
+			}
+
+			if err := hashFiles(path, info, nil); err != nil {
+				if errors.Is(err, fs.SkipDir) {
+					return nil
+				}
+				return err
+			}
+		}
+		if !info.IsDir() {
+			return nil
+		}
+
+		names, err := w.Filesystem.DirNames(path)
+		if err != nil {
+			if err := hashFiles(path, info, err); errors.Is(err, fs.SkipDir) {
+				return nil
+			} else {
+				return err
+			}
+		}
+		slices.Sort(names)
+
+		for _, name := range names {
+			child := filepath.Join(path, name)
+			childInfo, err := w.Filesystem.Lstat(child)
+			walkErr := hashFiles(child, childInfo, err)
+			switch {
+			case errors.Is(walkErr, fs.SkipDir):
+				continue
+			case walkErr != nil:
+				return walkErr
+			case err == nil && childInfo.IsDir():
+				if !enqueue(walkJob{path: child, info: childInfo, callbackDone: true}) {
+					return ctx.Err()
+				}
+			}
+		}
+		return nil
+	}
+
+	run.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer run.Done()
+			for job := range workCh {
+				if err := process(job); err != nil {
+					setFirstErr(err)
+				}
+				pending.Done()
+			}
+		}()
+	}
+
+	for _, start := range starts {
+		if !enqueue(walkJob{path: start}) {
+			break
+		}
+	}
+
+	go func() {
+		pending.Wait()
+		close(workCh)
+	}()
+
+	run.Wait()
+	return firstErr
 }
 
 // isWarnableError returns true if err is a kind of error we should warn
@@ -274,7 +419,38 @@ func isWarnableError(err error) bool {
 
 func (w *walker) walkAndHashFiles(ctx context.Context, toHashChan chan<- protocol.FileInfo, finishedChan chan<- ScanResult) fs.WalkFunc {
 	now := time.Now()
-	ignoredParent := ""
+	var ignoredDirsMut sync.Mutex
+	handledIgnoredDirs := make(map[string]struct{})
+
+	emitIgnoredAncestors := func(path string) error {
+		var ignoredAncestors []string
+		for parent := filepath.Dir(path); parent != "." && parent != ""; parent = filepath.Dir(parent) {
+			if w.Matcher.Match(parent).IsIgnored() {
+				ignoredAncestors = append(ignoredAncestors, parent)
+			}
+		}
+		for i := len(ignoredAncestors) - 1; i >= 0; i-- {
+			ignoredPath := ignoredAncestors[i]
+			ignoredDirsMut.Lock()
+			_, done := handledIgnoredDirs[ignoredPath]
+			if !done {
+				handledIgnoredDirs[ignoredPath] = struct{}{}
+			}
+			ignoredDirsMut.Unlock()
+			if done {
+				continue
+			}
+
+			info, err := w.Filesystem.Lstat(ignoredPath)
+			if err != nil {
+				return err
+			}
+			if err = w.handleItem(ctx, ignoredPath, info, toHashChan, finishedChan); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 
 	return func(path string, info fs.FileInfo, err error) error {
 		select {
@@ -323,10 +499,6 @@ func (w *walker) walkAndHashFiles(ctx context.Context, toHashChan chan<- protoco
 			if err != nil || m.CanSkipDir() || info.IsSymlink() {
 				return skip
 			}
-			// If the parent wasn't ignored already, set this path as the "highest" ignored parent
-			if info.IsDir() && (ignoredParent == "" || !fs.IsParent(path, ignoredParent)) {
-				ignoredParent = path
-			}
 			return nil
 		}
 
@@ -357,46 +529,15 @@ func (w *walker) walkAndHashFiles(ctx context.Context, toHashChan chan<- protoco
 			}
 		}
 
-		if ignoredParent == "" {
-			// parent isn't ignored, nothing special
-			if err := w.handleItem(ctx, path, info, toHashChan, finishedChan); err != nil {
-				handleError(ctx, "scan", path, err, finishedChan)
-				return skip
-			}
-			return nil
+		if err := emitIgnoredAncestors(path); err != nil {
+			handleError(ctx, "scan", path, err, finishedChan)
+			return skip
 		}
 
-		// Part of current path below the ignored (potential) parent
-		rel := strings.TrimPrefix(path, ignoredParent+string(fs.PathSeparator))
-
-		// ignored path isn't actually a parent of the current path
-		if rel == path {
-			ignoredParent = ""
-			if err := w.handleItem(ctx, path, info, toHashChan, finishedChan); err != nil {
-				handleError(ctx, "scan", path, err, finishedChan)
-				return skip
-			}
-			return nil
+		if err := w.handleItem(ctx, path, info, toHashChan, finishedChan); err != nil {
+			handleError(ctx, "scan", path, err, finishedChan)
+			return skip
 		}
-
-		// The previously ignored parent directories of the current, not
-		// ignored path need to be handled as well.
-		// Prepend an empty string to handle ignoredParent without anything
-		// appended in the first iteration.
-		for _, name := range append([]string{""}, fs.PathComponents(rel)...) {
-			ignoredParent = filepath.Join(ignoredParent, name)
-			info, err = w.Filesystem.Lstat(ignoredParent)
-			// An error here would be weird as we've already gotten to this point, but act on it nonetheless
-			if err != nil {
-				handleError(ctx, "scan", ignoredParent, err, finishedChan)
-				return skip
-			}
-			if err = w.handleItem(ctx, ignoredParent, info, toHashChan, finishedChan); err != nil {
-				handleError(ctx, "scan", path, err, finishedChan)
-				return skip
-			}
-		}
-		ignoredParent = ""
 
 		return nil
 	}
