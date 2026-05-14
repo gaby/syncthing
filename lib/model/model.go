@@ -2381,10 +2381,10 @@ func (m *model) promoteConnections() {
 			conn := m.connections[connIDs[0]]
 			l.Debugf("Promoting connection to %s at %s", deviceID.Short(), conn)
 			postLockActions = append(postLockActions, func() {
+				conn.ClusterConfig(cm, passwords)
 				if conn.Statistics().StartedAt.IsZero() {
 					conn.Start()
 				}
-				conn.ClusterConfig(cm, passwords)
 			})
 			m.promotedConnID[deviceID] = connIDs[0]
 		}
@@ -2395,8 +2395,8 @@ func (m *model) promoteConnections() {
 			conn := m.connections[connID]
 			if conn.Statistics().StartedAt.IsZero() {
 				postLockActions = append(postLockActions, func() {
-					conn.Start()
 					conn.ClusterConfig(&protocol.ClusterConfig{Secondary: true}, passwords)
+					conn.Start()
 				})
 			}
 		}
