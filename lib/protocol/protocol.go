@@ -26,6 +26,7 @@ import (
 	"time"
 
 	lz4 "github.com/pierrec/lz4/v4"
+	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/syncthing/syncthing/internal/gen/bep"
@@ -166,10 +167,16 @@ type rawConnection struct {
 	ConnectionInfo
 
 	deviceID  DeviceID
-	idString  string
 	model     rawModel
 	startTime time.Time
 	started   chan struct{}
+
+	// Per-device metric counters, resolved once at construction; these are
+	// updated per message so a label lookup per call would be costly.
+	metricRecvMessages          prometheus.Counter
+	metricRecvDecompressedBytes prometheus.Counter
+	metricSentMessages          prometheus.Counter
+	metricSentUncompressedBytes prometheus.Counter
 
 	cr     *countingReader
 	cw     *countingWriter
@@ -243,28 +250,31 @@ func NewConnection(deviceID DeviceID, reader io.Reader, writer io.Writer, closer
 
 func newRawConnection(deviceID DeviceID, reader io.Reader, writer io.Writer, closer io.Closer, receiver rawModel, connInfo ConnectionInfo, compress Compression) *rawConnection {
 	idString := deviceID.String()
-	cr := &countingReader{Reader: reader, idString: idString}
-	cw := &countingWriter{Writer: writer, idString: idString}
+	cr := &countingReader{Reader: reader, metric: metricDeviceRecvBytes.WithLabelValues(idString)}
+	cw := &countingWriter{Writer: writer, metric: metricDeviceSentBytes.WithLabelValues(idString)}
 	registerDeviceMetrics(idString)
 
 	return &rawConnection{
-		ConnectionInfo:        connInfo,
-		deviceID:              deviceID,
-		idString:              deviceID.String(),
-		model:                 receiver,
-		started:               make(chan struct{}),
-		cr:                    cr,
-		cw:                    cw,
-		closer:                closer,
-		awaiting:              make(map[int]chan asyncResult),
-		inbox:                 make(chan proto.Message),
-		outbox:                make(chan asyncMessage),
-		closeBox:              make(chan asyncMessage),
-		clusterConfigBox:      make(chan *ClusterConfig),
-		dispatcherLoopStopped: make(chan struct{}),
-		closed:                make(chan struct{}),
-		compression:           compress,
-		loopWG:                sync.WaitGroup{},
+		ConnectionInfo:              connInfo,
+		deviceID:                    deviceID,
+		metricRecvMessages:          metricDeviceRecvMessages.WithLabelValues(idString),
+		metricRecvDecompressedBytes: metricDeviceRecvDecompressedBytes.WithLabelValues(idString),
+		metricSentMessages:          metricDeviceSentMessages.WithLabelValues(idString),
+		metricSentUncompressedBytes: metricDeviceSentUncompressedBytes.WithLabelValues(idString),
+		model:                       receiver,
+		started:                     make(chan struct{}),
+		cr:                          cr,
+		cw:                          cw,
+		closer:                      closer,
+		awaiting:                    make(map[int]chan asyncResult),
+		inbox:                       make(chan proto.Message),
+		outbox:                      make(chan asyncMessage),
+		closeBox:                    make(chan asyncMessage),
+		clusterConfigBox:            make(chan *ClusterConfig),
+		dispatcherLoopStopped:       make(chan struct{}),
+		closed:                      make(chan struct{}),
+		compression:                 compress,
+		loopWG:                      sync.WaitGroup{},
 	}
 }
 
@@ -442,7 +452,7 @@ func (c *rawConnection) dispatcherLoop() (err error) {
 			return ErrClosed
 		}
 
-		metricDeviceRecvMessages.WithLabelValues(c.idString).Inc()
+		c.metricRecvMessages.Inc()
 
 		msgContext, err := messageContext(msg)
 		if err != nil {
@@ -561,7 +571,7 @@ func (c *rawConnection) readMessageAfterHeader(hdr *bep.Header, fourByteBuf []by
 
 	// ... and is then unmarshalled
 
-	metricDeviceRecvDecompressedBytes.WithLabelValues(c.idString).Add(float64(4 + len(buf)))
+	c.metricRecvDecompressedBytes.Add(float64(4 + len(buf)))
 
 	msg, err := newMessage(hdr.Type)
 	if err != nil {
@@ -600,7 +610,7 @@ func (c *rawConnection) readHeader(fourByteBuf []byte) (*bep.Header, error) {
 		return nil, fmt.Errorf("unmarshalling header: %w", err)
 	}
 
-	metricDeviceRecvDecompressedBytes.WithLabelValues(c.idString).Add(float64(2 + len(buf)))
+	c.metricRecvDecompressedBytes.Add(float64(2 + len(buf)))
 
 	return &hdr, nil
 }
@@ -618,16 +628,16 @@ func (c *rawConnection) handleIndexUpdate(im *IndexUpdate) error {
 // checkIndexConsistency verifies a number of invariants on FileInfos received in
 // index messages.
 func checkIndexConsistency(fs []FileInfo) error {
-	for _, f := range fs {
-		if err := checkFileInfoConsistency(f); err != nil {
-			return fmt.Errorf("%q: %w", f.Name, err)
+	for i := range fs {
+		if err := checkFileInfoConsistency(&fs[i]); err != nil {
+			return fmt.Errorf("%q: %w", fs[i].Name, err)
 		}
 	}
 	return nil
 }
 
 // checkFileInfoConsistency verifies a number of invariants on the given FileInfo
-func checkFileInfoConsistency(f FileInfo) error {
+func checkFileInfoConsistency(f *FileInfo) error {
 	if err := checkFilename(f.Name); err != nil {
 		return err
 	}
@@ -789,7 +799,7 @@ func (c *rawConnection) writeMessage(msg proto.Message) error {
 	l.Debugf("Writing %v", msgContext)
 
 	defer func() {
-		metricDeviceSentMessages.WithLabelValues(c.idString).Inc()
+		c.metricSentMessages.Inc()
 	}()
 
 	size := proto.Size(msg)
@@ -818,7 +828,7 @@ func (c *rawConnection) writeMessage(msg proto.Message) error {
 		}
 	}
 
-	metricDeviceSentUncompressedBytes.WithLabelValues(c.idString).Add(float64(totSize))
+	c.metricSentUncompressedBytes.Add(float64(totSize))
 
 	// Header length
 	binary.BigEndian.PutUint16(buf, uint16(hdrSize))
@@ -854,7 +864,7 @@ func (c *rawConnection) writeCompressedMessage(msg proto.Message, marshaled []by
 
 	cOverhead := 2 + hdrSize + 4
 
-	metricDeviceSentUncompressedBytes.WithLabelValues(c.idString).Add(float64(cOverhead + len(marshaled)))
+	c.metricSentUncompressedBytes.Add(float64(cOverhead + len(marshaled)))
 
 	// The compressed size may be at most n-n/32 = .96875*n bytes,
 	// I.e., if we can't save at least 3.125% bandwidth, we forgo compression.

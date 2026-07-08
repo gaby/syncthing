@@ -27,13 +27,18 @@ type Vector struct {
 
 func (v *Vector) String() string {
 	var buf strings.Builder
+	buf.Grow(len(v.Counters) * (16 + 1 + 20 + 1))
 	for i, c := range v.Counters {
 		if i > 0 {
-			buf.WriteRune(',')
+			buf.WriteByte(',')
 		}
 		var idbs [8]byte
 		binary.BigEndian.PutUint64(idbs[:], uint64(c.ID))
-		fmt.Fprintf(&buf, "%x:%d", idbs, c.Value)
+		var hexbs [16]byte
+		hex.Encode(hexbs[:], idbs[:])
+		buf.Write(hexbs[:])
+		buf.WriteByte(':')
+		buf.WriteString(strconv.FormatUint(c.Value, 10))
 	}
 	return buf.String()
 }

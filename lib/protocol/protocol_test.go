@@ -278,9 +278,13 @@ func TestWriteCompressed(t *testing.T) {
 	for _, random := range []bool{false, true} {
 		buf := new(bytes.Buffer)
 		c := &rawConnection{
-			cr:          &countingReader{Reader: buf},
-			cw:          &countingWriter{Writer: buf},
-			compression: CompressionAlways,
+			cr:                          &countingReader{Reader: buf, metric: metricDeviceRecvBytes.WithLabelValues("test")},
+			cw:                          &countingWriter{Writer: buf, metric: metricDeviceSentBytes.WithLabelValues("test")},
+			compression:                 CompressionAlways,
+			metricRecvMessages:          metricDeviceRecvMessages.WithLabelValues("test"),
+			metricRecvDecompressedBytes: metricDeviceRecvDecompressedBytes.WithLabelValues("test"),
+			metricSentMessages:          metricDeviceSentMessages.WithLabelValues("test"),
+			metricSentUncompressedBytes: metricDeviceSentUncompressedBytes.WithLabelValues("test"),
 		}
 
 		msg := (&Response{Data: make([]byte, 10240)}).toWire()
@@ -509,7 +513,7 @@ func TestCheckConsistency(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		err := checkFileInfoConsistency(tc.fi)
+		err := checkFileInfoConsistency(&tc.fi)
 		if tc.ok && err != nil {
 			t.Errorf("Unexpected error %v (want nil) for %v", err, tc.fi)
 		}

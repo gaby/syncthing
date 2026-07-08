@@ -1197,16 +1197,22 @@ func (f *sendReceiveFolder) reuseBlocks(ctx context.Context, blocks []protocol.B
 	// Check for any reusable blocks in the temp file
 	tempCopyBlocks, _ := blockDiff(tempBlocks, file.Blocks)
 
-	// block.String() returns a string unique to the block
-	existingBlocks := make(map[string]struct{}, len(tempCopyBlocks))
+	// The key is unique to the block: offset, size and hash together
+	// identify it, without the cost of formatting a string per block.
+	type blockKey struct {
+		offset int64
+		size   int
+		hash   string
+	}
+	existingBlocks := make(map[blockKey]struct{}, len(tempCopyBlocks))
 	for _, block := range tempCopyBlocks {
-		existingBlocks[block.String()] = struct{}{}
+		existingBlocks[blockKey{block.Offset, block.Size, string(block.Hash)}] = struct{}{}
 	}
 
 	// Since the blocks are already there, we don't need to get them.
 	blocks = blocks[:0]
 	for i, block := range file.Blocks {
-		_, ok := existingBlocks[block.String()]
+		_, ok := existingBlocks[blockKey{block.Offset, block.Size, string(block.Hash)}]
 		if !ok {
 			blocks = append(blocks, block)
 		} else {

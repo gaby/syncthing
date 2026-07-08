@@ -301,7 +301,6 @@ loop:
 		case e := <-l.events:
 			// Incoming events get sent
 			l.sendEvent(e)
-			metricEvents.WithLabelValues(e.Type.String(), metricEventStateCreated).Inc()
 
 		case fn := <-l.funcs:
 			// Subscriptions are handled here.
@@ -340,6 +339,13 @@ func (l *logger) sendEvent(e Event) {
 
 	e.GlobalID = l.nextGlobalID
 
+	// Resolve the metric counters once per event rather than doing a
+	// string conversion and label lookup per subscriber.
+	typeStr := e.Type.String()
+	metricEvents.WithLabelValues(typeStr, metricEventStateCreated).Inc()
+	deliveredCounter := metricEvents.WithLabelValues(typeStr, metricEventStateDelivered)
+	droppedCounter := metricEvents.WithLabelValues(typeStr, metricEventStateDropped)
+
 	for i, s := range l.subs {
 		if s.mask&e.Type != 0 {
 			e.SubscriptionID = l.nextSubscriptionIDs[i]
@@ -350,11 +356,11 @@ func (l *logger) sendEvent(e Event) {
 
 			select {
 			case s.events <- e:
-				metricEvents.WithLabelValues(e.Type.String(), metricEventStateDelivered).Inc()
+				deliveredCounter.Inc()
 			case <-l.timeout.C:
 				// if s.events is not ready, drop the event
 				timedOut = true
-				metricEvents.WithLabelValues(e.Type.String(), metricEventStateDropped).Inc()
+				droppedCounter.Inc()
 			}
 
 			// If stop returns false it already sent something to the

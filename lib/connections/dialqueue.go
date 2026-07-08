@@ -7,7 +7,7 @@
 package connections
 
 import (
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/syncthing/syncthing/lib/protocol"
@@ -27,12 +27,14 @@ func (queue dialQueue) Sort() {
 	// Sort the queue with the most recently seen device at the head,
 	// increasing the likelihood of connecting to a device that we're
 	// already almost up to date with, index wise.
-	sort.Slice(queue, func(a, b int) bool {
-		qa, qb := queue[a], queue[b]
-		if qa.shortLived != qb.shortLived {
-			return qb.shortLived
+	slices.SortFunc(queue, func(a, b dialQueueEntry) int {
+		if a.shortLived != b.shortLived {
+			if b.shortLived {
+				return -1
+			}
+			return 1
 		}
-		return qa.lastSeen.After(qb.lastSeen)
+		return b.lastSeen.Compare(a.lastSeen)
 	})
 
 	// Shuffle the part of the connection queue that are devices we haven't

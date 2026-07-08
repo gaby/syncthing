@@ -29,7 +29,8 @@ type FileInfoBatch struct {
 // to flush. Errors from the flush function are considered non-recoverable;
 // once an error is returned the flush function wil not be called again, and
 // any further calls to Flush will return the same error (unless Reset is
-// called).
+// called). The slice passed to fn is reused for the next batch after fn
+// returns and must not be retained.
 func NewFileInfoBatch(fn func([]protocol.FileInfo) error) *FileInfoBatch {
 	return &FileInfoBatch{flushFn: fn}
 }
@@ -79,7 +80,12 @@ func (b *FileInfoBatch) Flush() error {
 }
 
 func (b *FileInfoBatch) Reset() {
-	b.infos = nil
+	// Keep the backing array for reuse by the next batch. This is safe
+	// because flush functions must not retain the slice after returning:
+	// they either process it synchronously or copy what they need.
+	if b.infos != nil {
+		b.infos = b.infos[:0]
+	}
 	b.error = nil
 	b.nblocks = 0
 }

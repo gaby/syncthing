@@ -78,6 +78,7 @@ func TestProgressEmitter(t *testing.T) {
 
 	s := sharedPullerState{
 		updated: time.Now(),
+		metrics: newPullerProcessedMetrics("default"),
 	}
 	p.Register(&s)
 
