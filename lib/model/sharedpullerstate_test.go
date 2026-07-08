@@ -13,6 +13,10 @@ import (
 	"github.com/syncthing/syncthing/lib/rand"
 )
 
+// testPullerMetrics is used by test constructions of sharedPullerState;
+// the metric counters must be non-nil for the metric-updating methods.
+var testPullerMetrics = newPullerProcessedMetrics("_testfolder")
+
 // Test creating temporary file inside read-only directory
 func TestReadOnlyDir(t *testing.T) {
 	ffs := fs.NewFilesystem(fs.FilesystemTypeFake, rand.String(32))
@@ -21,6 +25,7 @@ func TestReadOnlyDir(t *testing.T) {
 	s := sharedPullerState{
 		fs:       ffs,
 		tempName: "testdir/.temp_name",
+		metrics:  testPullerMetrics,
 	}
 
 	fd, err := s.tempFile()

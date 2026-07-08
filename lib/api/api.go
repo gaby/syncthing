@@ -214,7 +214,7 @@ func sendJSON(w http.ResponseWriter, jsonObject any) {
 		return
 	}
 	w.Write(bs)
-	w.Write([]byte{'\n'})
+	io.WriteString(w, "\n")
 }
 
 func (s *service) Serve(ctx context.Context) error {

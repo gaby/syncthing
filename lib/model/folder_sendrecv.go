@@ -1197,9 +1197,9 @@ func (f *sendReceiveFolder) reuseBlocks(ctx context.Context, blocks []protocol.B
 	}
 
 	// A block of the temp file is reusable when its hash matches the
-	// wanted block at the same position (the same positional comparison
-	// blockDiff does; both lists use the same block size). Since those
-	// blocks are already there, we don't need to get them.
+	// wanted block at the same position; both lists use the same block
+	// size. Since those blocks are already there, we don't need to get
+	// them.
 	blocks = blocks[:0]
 	for i, block := range file.Blocks {
 		if i < len(tempBlocks) && bytes.Equal(block.Hash, tempBlocks[i].Hash) {
