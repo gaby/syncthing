@@ -455,8 +455,6 @@ func (r *defaultRealCaser) realCase(name string) (string, error) {
 			}
 		}
 
-		// Name is canonicalized, so plain concatenation produces the same
-		// result as filepath.Join without re-cleaning the path every time.
 		if realName == "." {
 			realName = comp
 		} else {

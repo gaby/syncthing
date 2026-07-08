@@ -13,8 +13,9 @@ import (
 	"github.com/syncthing/syncthing/lib/rand"
 )
 
-// testPullerMetrics is used by test constructions of sharedPullerState;
-// the metric counters must be non-nil for the metric-updating methods.
+// testPullerMetrics is set in all test constructions of sharedPullerState,
+// defensively, so that no test state is one metric-updating method call
+// away from a nil counter panic.
 var testPullerMetrics = newPullerProcessedMetrics("_testfolder")
 
 // Test creating temporary file inside read-only directory
