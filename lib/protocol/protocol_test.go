@@ -277,15 +277,7 @@ func TestUnmarshalFDPUv16v17(t *testing.T) {
 func TestWriteCompressed(t *testing.T) {
 	for _, random := range []bool{false, true} {
 		buf := new(bytes.Buffer)
-		c := &rawConnection{
-			cr:                          &countingReader{Reader: buf, metric: metricDeviceRecvBytes.WithLabelValues("test")},
-			cw:                          &countingWriter{Writer: buf, metric: metricDeviceSentBytes.WithLabelValues("test")},
-			compression:                 CompressionAlways,
-			metricRecvMessages:          metricDeviceRecvMessages.WithLabelValues("test"),
-			metricRecvDecompressedBytes: metricDeviceRecvDecompressedBytes.WithLabelValues("test"),
-			metricSentMessages:          metricDeviceSentMessages.WithLabelValues("test"),
-			metricSentUncompressedBytes: metricDeviceSentUncompressedBytes.WithLabelValues("test"),
-		}
+		c := newRawConnection(c0ID, buf, buf, testutil.NoopCloser{}, nil, new(mockedConnectionInfo), CompressionAlways)
 
 		msg := (&Response{Data: make([]byte, 10240)}).toWire()
 		if random {

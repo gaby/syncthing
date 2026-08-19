@@ -427,6 +427,10 @@ func newCaseCache() *caseCache {
 	}
 }
 
+// realCase returns the actual case-resolved form of name. The name must be
+// a canonicalized, clean relative path (as produced by Canonicalize): the
+// component iteration and plain concatenation below rely on it containing
+// no redundant separators or dot components.
 func (r *defaultRealCaser) realCase(name string) (string, error) {
 	realName := "."
 	if name == realName {

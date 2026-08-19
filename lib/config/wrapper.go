@@ -360,11 +360,7 @@ func (w *wrapper) Devices() map[protocol.DeviceID]DeviceConfiguration {
 func (w *wrapper) DeviceList() []DeviceConfiguration {
 	w.mut.Lock()
 	defer w.mut.Unlock()
-	devices := make([]DeviceConfiguration, len(w.cfg.Devices))
-	for i := range w.cfg.Devices {
-		devices[i] = w.cfg.Devices[i].Copy()
-	}
-	return devices
+	return sliceutil.Map(w.cfg.Devices, DeviceConfiguration.Copy)
 }
 
 // RemoveDevice removes the device from the configuration
@@ -397,11 +393,7 @@ func (w *wrapper) Folders() map[string]FolderConfiguration {
 func (w *wrapper) FolderList() []FolderConfiguration {
 	w.mut.Lock()
 	defer w.mut.Unlock()
-	folders := make([]FolderConfiguration, len(w.cfg.Folders))
-	for i := range w.cfg.Folders {
-		folders[i] = w.cfg.Folders[i].Copy()
-	}
-	return folders
+	return sliceutil.Map(w.cfg.Folders, FolderConfiguration.Copy)
 }
 
 // RemoveFolder removes the folder from the configuration

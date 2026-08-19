@@ -130,6 +130,7 @@ type sendReceiveFolder struct {
 	queue              *jobQueue
 	blockPullReorderer blockPullReorderer
 	writeLimiter       *semaphore.Semaphore
+	pullerMetrics      pullerProcessedMetrics
 
 	tempPullErrors map[string]string // pull errors that might be just transient
 }
@@ -140,6 +141,7 @@ func newSendReceiveFolder(model *model, ignores *ignore.Matcher, cfg config.Fold
 		queue:              newJobQueue(),
 		blockPullReorderer: newBlockPullReorderer(cfg.BlockPullOrder, model.id, cfg.DeviceIDs()),
 		writeLimiter:       semaphore.New(cfg.MaxConcurrentWrites),
+		pullerMetrics:      newPullerProcessedMetrics(cfg.ID),
 	}
 	f.puller = f
 
@@ -1164,7 +1166,7 @@ func (f *sendReceiveFolder) handleFile(ctx context.Context, file protocol.FileIn
 		"action": "update",
 	})
 
-	s := newSharedPullerState(file, f.mtimefs, f.folderID, tempName, blocks, reused, f.IgnorePerms || file.NoPermissions, hasCurFile, curFile, !f.DisableSparseFiles, !f.DisableFsync)
+	s := newSharedPullerState(file, f.mtimefs, f.folderID, tempName, blocks, reused, f.IgnorePerms || file.NoPermissions, hasCurFile, curFile, !f.DisableSparseFiles, !f.DisableFsync, f.pullerMetrics)
 
 	f.sl.DebugContext(ctx, "Handling file", slogutil.FilePath(file.Name), "blocksToCopy", len(blocks), "reused", len(reused))
 
@@ -1194,29 +1196,16 @@ func (f *sendReceiveFolder) reuseBlocks(ctx context.Context, blocks []protocol.B
 		return blocks, reused
 	}
 
-	// Check for any reusable blocks in the temp file
-	tempCopyBlocks, _ := blockDiff(tempBlocks, file.Blocks)
-
-	// The key is unique to the block: offset, size and hash together
-	// identify it, without the cost of formatting a string per block.
-	type blockKey struct {
-		offset int64
-		size   int
-		hash   string
-	}
-	existingBlocks := make(map[blockKey]struct{}, len(tempCopyBlocks))
-	for _, block := range tempCopyBlocks {
-		existingBlocks[blockKey{block.Offset, block.Size, string(block.Hash)}] = struct{}{}
-	}
-
-	// Since the blocks are already there, we don't need to get them.
+	// A block of the temp file is reusable when its hash matches the
+	// wanted block at the same position (the same positional comparison
+	// blockDiff does; both lists use the same block size). Since those
+	// blocks are already there, we don't need to get them.
 	blocks = blocks[:0]
 	for i, block := range file.Blocks {
-		_, ok := existingBlocks[blockKey{block.Offset, block.Size, string(block.Hash)}]
-		if !ok {
-			blocks = append(blocks, block)
-		} else {
+		if i < len(tempBlocks) && bytes.Equal(block.Hash, tempBlocks[i].Hash) {
 			reused = append(reused, i)
+		} else {
+			blocks = append(blocks, block)
 		}
 	}
 

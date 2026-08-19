@@ -18,8 +18,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/syncthing/syncthing/lib/syncutil"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/thejerf/suture/v4"
+
+	"github.com/syncthing/syncthing/lib/syncutil"
 )
 
 type EventType int64
@@ -339,12 +341,13 @@ func (l *logger) sendEvent(e Event) {
 
 	e.GlobalID = l.nextGlobalID
 
-	// Resolve the metric counters once per event rather than doing a
-	// string conversion and label lookup per subscriber.
+	// Resolve the metric counters at most once per event rather than doing
+	// a string conversion and label lookup per subscriber. The delivered
+	// and dropped counters are resolved lazily so their series only exist
+	// once actually incremented.
 	typeStr := e.Type.String()
 	metricEvents.WithLabelValues(typeStr, metricEventStateCreated).Inc()
-	deliveredCounter := metricEvents.WithLabelValues(typeStr, metricEventStateDelivered)
-	droppedCounter := metricEvents.WithLabelValues(typeStr, metricEventStateDropped)
+	var deliveredCounter, droppedCounter prometheus.Counter
 
 	for i, s := range l.subs {
 		if s.mask&e.Type != 0 {
@@ -356,10 +359,16 @@ func (l *logger) sendEvent(e Event) {
 
 			select {
 			case s.events <- e:
+				if deliveredCounter == nil {
+					deliveredCounter = metricEvents.WithLabelValues(typeStr, metricEventStateDelivered)
+				}
 				deliveredCounter.Inc()
 			case <-l.timeout.C:
 				// if s.events is not ready, drop the event
 				timedOut = true
+				if droppedCounter == nil {
+					droppedCounter = metricEvents.WithLabelValues(typeStr, metricEventStateDropped)
+				}
 				droppedCounter.Inc()
 			}
 

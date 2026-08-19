@@ -213,7 +213,8 @@ func sendJSON(w http.ResponseWriter, jsonObject any) {
 		http.Error(w, string(bs), http.StatusInternalServerError)
 		return
 	}
-	w.Write(append(bs, '\n'))
+	w.Write(bs)
+	w.Write([]byte{'\n'})
 }
 
 func (s *service) Serve(ctx context.Context) error {

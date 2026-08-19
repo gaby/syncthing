@@ -74,7 +74,7 @@ type sharedPullerState struct {
 	mut              sync.RWMutex    // Protects the above
 }
 
-func newSharedPullerState(file protocol.FileInfo, fs fs.Filesystem, folderID, tempName string, blocks []protocol.BlockInfo, reused []int, ignorePerms, hasCurFile bool, curFile protocol.FileInfo, sparse bool, fsync bool) *sharedPullerState {
+func newSharedPullerState(file protocol.FileInfo, fs fs.Filesystem, folderID, tempName string, blocks []protocol.BlockInfo, reused []int, ignorePerms, hasCurFile bool, curFile protocol.FileInfo, sparse bool, fsync bool, metrics pullerProcessedMetrics) *sharedPullerState {
 	// Map the existing blocks by hash to block index in the current file
 	blocksMap := make(map[string]int, len(curFile.Blocks))
 	for idx, block := range curFile.Blocks {
@@ -85,7 +85,7 @@ func newSharedPullerState(file protocol.FileInfo, fs fs.Filesystem, folderID, te
 		file:             file,
 		fs:               fs,
 		folder:           folderID,
-		metrics:          newPullerProcessedMetrics(folderID),
+		metrics:          metrics,
 		tempName:         tempName,
 		realName:         file.Name,
 		copyTotal:        len(blocks),
