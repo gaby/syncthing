@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -426,6 +427,10 @@ func newCaseCache() *caseCache {
 	}
 }
 
+// realCase returns the actual case-resolved form of name. The name must be
+// a canonicalized, clean relative path (as produced by Canonicalize): the
+// component iteration and plain concatenation below rely on it containing
+// no redundant separators or dot components.
 func (r *defaultRealCaser) realCase(name string) (string, error) {
 	realName := "."
 	if name == realName {
@@ -435,7 +440,7 @@ func (r *defaultRealCaser) realCase(name string) (string, error) {
 	r.cache.mut.Lock()
 	defer r.cache.mut.Unlock()
 
-	for _, comp := range PathComponents(name) {
+	for comp := range strings.SplitSeq(name, pathSeparatorString) {
 		node := r.cache.getExpireAdd(realName, r.fs)
 
 		if node.err != nil {
@@ -450,7 +455,11 @@ func (r *defaultRealCaser) realCase(name string) (string, error) {
 			}
 		}
 
-		realName = filepath.Join(realName, comp)
+		if realName == "." {
+			realName = comp
+		} else {
+			realName += pathSeparatorString + comp
+		}
 	}
 
 	return realName, nil

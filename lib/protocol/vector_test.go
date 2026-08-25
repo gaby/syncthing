@@ -388,3 +388,38 @@ func TestCompare(t *testing.T) {
 		}
 	}
 }
+
+func TestVectorString(t *testing.T) {
+	// The string form is used as a database key and must stay exactly
+	// equivalent to the historical fmt.Sprintf("%x:%d", ...) format.
+	cases := []struct {
+		v        Vector
+		expected string
+	}{
+		{Vector{}, ""},
+		{Vector{Counters: []Counter{{ID: 0, Value: 0}}}, "0000000000000000:0"},
+		{Vector{Counters: []Counter{{ID: 42, Value: 5}}}, "000000000000002a:5"},
+		{
+			Vector{Counters: []Counter{
+				{ID: 42, Value: 5},
+				{ID: ShortID(math.MaxUint64), Value: math.MaxUint64},
+			}},
+			"000000000000002a:5,ffffffffffffffff:18446744073709551615",
+		},
+	}
+	for _, tc := range cases {
+		if s := tc.v.String(); s != tc.expected {
+			t.Errorf("String() => %q, expected %q", s, tc.expected)
+		}
+		if len(tc.v.Counters) == 0 {
+			continue
+		}
+		// Round-trip through VectorFromString
+		parsed, err := VectorFromString(tc.expected)
+		if err != nil {
+			t.Errorf("VectorFromString(%q): %v", tc.expected, err)
+		} else if !parsed.Equal(tc.v) {
+			t.Errorf("VectorFromString(%q) => %+v, expected %+v", tc.expected, parsed, tc.v)
+		}
+	}
+}

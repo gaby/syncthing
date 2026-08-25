@@ -9,6 +9,7 @@ package model
 import (
 	"bytes"
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -61,9 +62,14 @@ type fakeConnection struct {
 }
 
 func (f *fakeConnection) setIndexFn(fn func(_ context.Context, folder string, fs []protocol.FileInfo) error) {
-	f.IndexCalls(func(ctx context.Context, idx *protocol.Index) error { return fn(ctx, idx.Folder, idx.Files) })
+	// The file infos are cloned before they are handed to fn, since the
+	// real connection also consumes them synchronously (converting to
+	// wire format) while many callbacks retain them past the call.
+	f.IndexCalls(func(ctx context.Context, idx *protocol.Index) error {
+		return fn(ctx, idx.Folder, slices.Clone(idx.Files))
+	})
 	f.IndexUpdateCalls(func(ctx context.Context, idxUp *protocol.IndexUpdate) error {
-		return fn(ctx, idxUp.Folder, idxUp.Files)
+		return fn(ctx, idxUp.Folder, slices.Clone(idxUp.Files))
 	})
 }
 

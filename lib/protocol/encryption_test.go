@@ -221,7 +221,7 @@ func TestEncryptedFileInfoConsistency(t *testing.T) {
 	files[1].SetIgnored()
 	for i, f := range files {
 		enc := encryptFileInfo(testKeyGen, f, &key)
-		if err := checkFileInfoConsistency(enc); err != nil {
+		if err := checkFileInfoConsistency(&enc); err != nil {
 			t.Errorf("%v: %v", i, err)
 		}
 	}

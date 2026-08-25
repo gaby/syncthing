@@ -18,8 +18,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/syncthing/syncthing/lib/syncutil"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/thejerf/suture/v4"
+
+	"github.com/syncthing/syncthing/lib/syncutil"
 )
 
 type EventType int64
@@ -301,7 +303,6 @@ loop:
 		case e := <-l.events:
 			// Incoming events get sent
 			l.sendEvent(e)
-			metricEvents.WithLabelValues(e.Type.String(), metricEventStateCreated).Inc()
 
 		case fn := <-l.funcs:
 			// Subscriptions are handled here.
@@ -340,6 +341,14 @@ func (l *logger) sendEvent(e Event) {
 
 	e.GlobalID = l.nextGlobalID
 
+	// Resolve the metric counters at most once per event rather than doing
+	// a string conversion and label lookup per subscriber. The delivered
+	// and dropped counters are resolved lazily so their series only exist
+	// once actually incremented.
+	typeStr := e.Type.String()
+	metricEvents.WithLabelValues(typeStr, metricEventStateCreated).Inc()
+	var deliveredCounter, droppedCounter prometheus.Counter
+
 	for i, s := range l.subs {
 		if s.mask&e.Type != 0 {
 			e.SubscriptionID = l.nextSubscriptionIDs[i]
@@ -350,11 +359,17 @@ func (l *logger) sendEvent(e Event) {
 
 			select {
 			case s.events <- e:
-				metricEvents.WithLabelValues(e.Type.String(), metricEventStateDelivered).Inc()
+				if deliveredCounter == nil {
+					deliveredCounter = metricEvents.WithLabelValues(typeStr, metricEventStateDelivered)
+				}
+				deliveredCounter.Inc()
 			case <-l.timeout.C:
 				// if s.events is not ready, drop the event
 				timedOut = true
-				metricEvents.WithLabelValues(e.Type.String(), metricEventStateDropped).Inc()
+				if droppedCounter == nil {
+					droppedCounter = metricEvents.WithLabelValues(typeStr, metricEventStateDropped)
+				}
+				droppedCounter.Inc()
 			}
 
 			// If stop returns false it already sent something to the

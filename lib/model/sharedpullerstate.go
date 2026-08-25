@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/syncthing/syncthing/internal/protoutil"
@@ -21,6 +22,24 @@ import (
 	"github.com/syncthing/syncthing/lib/protocol"
 )
 
+// pullerProcessedMetrics holds the per-folder processed-bytes counters,
+// resolved once instead of doing a label lookup for every block.
+type pullerProcessedMetrics struct {
+	network     prometheus.Counter
+	localOrigin prometheus.Counter
+	localOther  prometheus.Counter
+	skipped     prometheus.Counter
+}
+
+func newPullerProcessedMetrics(folderID string) pullerProcessedMetrics {
+	return pullerProcessedMetrics{
+		network:     metricFolderProcessedBytesTotal.WithLabelValues(folderID, metricSourceNetwork),
+		localOrigin: metricFolderProcessedBytesTotal.WithLabelValues(folderID, metricSourceLocalOrigin),
+		localOther:  metricFolderProcessedBytesTotal.WithLabelValues(folderID, metricSourceLocalOther),
+		skipped:     metricFolderProcessedBytesTotal.WithLabelValues(folderID, metricSourceSkipped),
+	}
+}
+
 // A sharedPullerState is kept for each file that is being synced and is kept
 // updated along the way.
 type sharedPullerState struct {
@@ -28,6 +47,7 @@ type sharedPullerState struct {
 	file          protocol.FileInfo // The new file (desired end state)
 	fs            fs.Filesystem
 	folder        string
+	metrics       pullerProcessedMetrics
 	tempName      string
 	realName      string
 	reused        int // Number of blocks reused from temporary file
@@ -54,7 +74,7 @@ type sharedPullerState struct {
 	mut              sync.RWMutex    // Protects the above
 }
 
-func newSharedPullerState(file protocol.FileInfo, fs fs.Filesystem, folderID, tempName string, blocks []protocol.BlockInfo, reused []int, ignorePerms, hasCurFile bool, curFile protocol.FileInfo, sparse bool, fsync bool) *sharedPullerState {
+func newSharedPullerState(file protocol.FileInfo, fs fs.Filesystem, folderID, tempName string, blocks []protocol.BlockInfo, reused []int, ignorePerms, hasCurFile bool, curFile protocol.FileInfo, sparse bool, fsync bool, metrics pullerProcessedMetrics) *sharedPullerState {
 	// Map the existing blocks by hash to block index in the current file
 	blocksMap := make(map[string]int, len(curFile.Blocks))
 	for idx, block := range curFile.Blocks {
@@ -65,6 +85,7 @@ func newSharedPullerState(file protocol.FileInfo, fs fs.Filesystem, folderID, te
 		file:             file,
 		fs:               fs,
 		folder:           folderID,
+		metrics:          metrics,
 		tempName:         tempName,
 		realName:         file.Name,
 		copyTotal:        len(blocks),
@@ -275,11 +296,11 @@ func (s *sharedPullerState) copiedFromOrigin(bytes int) {
 	s.copyOrigin++
 	s.updated = time.Now()
 	s.mut.Unlock()
-	metricFolderProcessedBytesTotal.WithLabelValues(s.folder, metricSourceLocalOrigin).Add(float64(bytes))
+	s.metrics.localOrigin.Add(float64(bytes))
 }
 
 func (s *sharedPullerState) copiedFromElsewhere(bytes int) {
-	metricFolderProcessedBytesTotal.WithLabelValues(s.folder, metricSourceLocalOther).Add(float64(bytes))
+	s.metrics.localOther.Add(float64(bytes))
 }
 
 func (s *sharedPullerState) skippedSparseBlock(bytes int) {
@@ -288,7 +309,7 @@ func (s *sharedPullerState) skippedSparseBlock(bytes int) {
 	s.copyOrigin++
 	s.updated = time.Now()
 	s.mut.Unlock()
-	metricFolderProcessedBytesTotal.WithLabelValues(s.folder, metricSourceSkipped).Add(float64(bytes))
+	s.metrics.skipped.Add(float64(bytes))
 }
 
 func (s *sharedPullerState) pullStarted() {
@@ -310,7 +331,7 @@ func (s *sharedPullerState) pullDone(block protocol.BlockInfo) {
 	s.availableUpdated = time.Now()
 	l.Debugln("sharedPullerState", s.folder, s.file.Name, "pullNeeded done ->", s.pullNeeded)
 	s.mut.Unlock()
-	metricFolderProcessedBytesTotal.WithLabelValues(s.folder, metricSourceNetwork).Add(float64(block.Size))
+	s.metrics.network.Add(float64(block.Size))
 }
 
 // finalClose atomically closes and returns closed status of a file. A true
