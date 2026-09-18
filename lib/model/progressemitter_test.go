@@ -78,6 +78,7 @@ func TestProgressEmitter(t *testing.T) {
 
 	s := sharedPullerState{
 		updated: time.Now(),
+		metrics: testPullerMetrics,
 	}
 	p.Register(&s)
 
@@ -214,7 +215,8 @@ func TestSendDownloadProgressMessages(t *testing.T) {
 	blocks := make([]protocol.BlockInfo, 11)
 
 	state1 := &sharedPullerState{
-		folder: "folder",
+		metrics: testPullerMetrics,
+		folder:  "folder",
 		file: protocol.FileInfo{
 			Name:    "state1",
 			Version: v1,
@@ -296,7 +298,8 @@ func TestSendDownloadProgressMessages(t *testing.T) {
 	state1.availableUpdated = tick()
 
 	state2 := &sharedPullerState{
-		folder: "folder2",
+		metrics: testPullerMetrics,
+		folder:  "folder2",
 		file: protocol.FileInfo{
 			Name:    "state2",
 			Version: v1,
@@ -306,7 +309,8 @@ func TestSendDownloadProgressMessages(t *testing.T) {
 		availableUpdated: time.Now(),
 	}
 	state3 := &sharedPullerState{
-		folder: "folder",
+		metrics: testPullerMetrics,
+		folder:  "folder",
 		file: protocol.FileInfo{
 			Name:    "state3",
 			Version: v1,
@@ -316,7 +320,8 @@ func TestSendDownloadProgressMessages(t *testing.T) {
 		availableUpdated: time.Now(),
 	}
 	state4 := &sharedPullerState{
-		folder: "folder2",
+		metrics: testPullerMetrics,
+		folder:  "folder2",
 		file: protocol.FileInfo{
 			Name:    "state4",
 			Version: v1,
@@ -362,7 +367,8 @@ func TestSendDownloadProgressMessages(t *testing.T) {
 	// Not sent for "inactive" (symlinks, dirs, or wrong folder) pullers
 	// Directory
 	state5 := &sharedPullerState{
-		folder: "folder",
+		metrics: testPullerMetrics,
+		folder:  "folder",
 		file: protocol.FileInfo{
 			Name:    "state5",
 			Version: v1,
@@ -374,7 +380,8 @@ func TestSendDownloadProgressMessages(t *testing.T) {
 	}
 	// Symlink
 	state6 := &sharedPullerState{
-		folder: "folder",
+		metrics: testPullerMetrics,
+		folder:  "folder",
 		file: protocol.FileInfo{
 			Name:    "state6",
 			Version: v1,
@@ -385,7 +392,8 @@ func TestSendDownloadProgressMessages(t *testing.T) {
 	}
 	// Some other directory
 	state7 := &sharedPullerState{
-		folder: "folderXXX",
+		metrics: testPullerMetrics,
+		folder:  "folderXXX",
 		file: protocol.FileInfo{
 			Name:    "state7",
 			Version: v1,
@@ -396,7 +404,8 @@ func TestSendDownloadProgressMessages(t *testing.T) {
 	}
 	// Less than 10 blocks
 	state8 := &sharedPullerState{
-		folder: "folder",
+		metrics: testPullerMetrics,
+		folder:  "folder",
 		file: protocol.FileInfo{
 			Name:    "state8",
 			Version: v1,

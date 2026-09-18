@@ -890,7 +890,7 @@ func TestPullCtxCancel(t *testing.T) {
 
 	emptyState := func() pullBlockState {
 		return pullBlockState{
-			sharedPullerState: newSharedPullerState(protocol.FileInfo{}, nil, f.folderID, "", nil, nil, false, false, protocol.FileInfo{}, false, false),
+			sharedPullerState: newSharedPullerState(protocol.FileInfo{}, nil, f.folderID, "", nil, nil, false, false, protocol.FileInfo{}, false, false, f.pullerMetrics),
 			block:             protocol.BlockInfo{Size: 42},
 		}
 	}
@@ -968,7 +968,7 @@ func TestPullEmptyBlock(t *testing.T) {
 			}
 
 			state := pullBlockState{
-				sharedPullerState: newSharedPullerState(file, f.Filesystem(), f.folderID, tempName, file.Blocks, tc.reused, false, false, protocol.FileInfo{}, !tc.disableSparse, false),
+				sharedPullerState: newSharedPullerState(file, f.Filesystem(), f.folderID, tempName, file.Blocks, tc.reused, false, false, protocol.FileInfo{}, !tc.disableSparse, false, f.pullerMetrics),
 				block:             emptyBlock,
 			}
 

@@ -10,14 +10,16 @@ import (
 	"io"
 	"sync/atomic"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 type countingReader struct {
 	io.Reader
 
-	idString string
-	tot      atomic.Int64 // bytes
-	last     atomic.Int64 // unix nanos
+	metric prometheus.Counter // resolved once; Read is too hot for a label lookup
+	tot    atomic.Int64       // bytes
+	last   atomic.Int64       // unix nanos
 }
 
 var (
@@ -30,7 +32,7 @@ func (c *countingReader) Read(bs []byte) (int, error) {
 	c.tot.Add(int64(n))
 	totalIncoming.Add(int64(n))
 	c.last.Store(time.Now().UnixNano())
-	metricDeviceRecvBytes.WithLabelValues(c.idString).Add(float64(n))
+	c.metric.Add(float64(n))
 	return n, err
 }
 
@@ -43,9 +45,9 @@ func (c *countingReader) Last() time.Time {
 type countingWriter struct {
 	io.Writer
 
-	idString string
-	tot      atomic.Int64 // bytes
-	last     atomic.Int64 // unix nanos
+	metric prometheus.Counter // resolved once; Write is too hot for a label lookup
+	tot    atomic.Int64       // bytes
+	last   atomic.Int64       // unix nanos
 }
 
 func (c *countingWriter) Write(bs []byte) (int, error) {
@@ -53,7 +55,7 @@ func (c *countingWriter) Write(bs []byte) (int, error) {
 	c.tot.Add(int64(n))
 	totalOutgoing.Add(int64(n))
 	c.last.Store(time.Now().UnixNano())
-	metricDeviceSentBytes.WithLabelValues(c.idString).Add(float64(n))
+	c.metric.Add(float64(n))
 	return n, err
 }
 

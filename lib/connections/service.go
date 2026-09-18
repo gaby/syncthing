@@ -1417,6 +1417,8 @@ func (c *deviceConnectionTracker) closeWorsePriorityConnectionsLocked(d protocol
 	}
 }
 
+var connectionIDEncoding = base32.HexEncoding.WithPadding(base32.NoPadding)
+
 // newConnectionID generates a connection ID. The connection ID is designed
 // to be unique for each connection and chronologically sortable. It is
 // based on the sum of two timestamps: when we think the connection was
@@ -1428,11 +1430,10 @@ func newConnectionID(t0, t1 int64) string {
 	var buf [16]byte // 8 bytes timestamp, 8 bytes random
 	binary.BigEndian.PutUint64(buf[:], uint64(t0+t1))
 	_, _ = io.ReadFull(rand.Reader, buf[8:])
-	enc := base32.HexEncoding.WithPadding(base32.NoPadding)
 	// We encode the two parts separately and concatenate the results. The
 	// reason for this is that the timestamp (64 bits) doesn't precisely
 	// align to the base32 encoding (5 bits per character), so we'd get a
 	// character in the middle that is a mix of bits from the timestamp and
 	// from the random. We want the timestamp part deterministic.
-	return enc.EncodeToString(buf[:8]) + enc.EncodeToString(buf[8:])
+	return connectionIDEncoding.EncodeToString(buf[:8]) + connectionIDEncoding.EncodeToString(buf[8:])
 }

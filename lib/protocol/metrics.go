@@ -50,14 +50,3 @@ var (
 		Help:      "Total number of messages received, per device",
 	}, []string{"device"})
 )
-
-func registerDeviceMetrics(deviceID string) {
-	// Register metrics for this device, so that counters are present even
-	// when zero.
-	metricDeviceSentBytes.WithLabelValues(deviceID)
-	metricDeviceSentUncompressedBytes.WithLabelValues(deviceID)
-	metricDeviceSentMessages.WithLabelValues(deviceID)
-	metricDeviceRecvBytes.WithLabelValues(deviceID)
-	metricDeviceRecvDecompressedBytes.WithLabelValues(deviceID)
-	metricDeviceRecvMessages.WithLabelValues(deviceID)
-}

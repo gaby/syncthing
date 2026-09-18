@@ -73,6 +73,11 @@ func (t *relayListener) handleInvitations(ctx context.Context, clnt client.Relay
 	// Start with nil, so that we send a addresses changed notification as soon as we connect somewhere.
 	var oldURI *url.URL
 
+	// A ticker instead of time.After in the loop below, to avoid
+	// allocating a new timer on every iteration.
+	uriCheck := time.NewTicker(10 * time.Second)
+	defer uriCheck.Stop()
+
 	for {
 		select {
 		case inv := <-invitations:
@@ -114,7 +119,7 @@ func (t *relayListener) handleInvitations(ctx context.Context, clnt client.Relay
 		// relay URI has changed. This can only happen when we connect to a
 		// relay via dynamic+http(s) pool, which upon a relay failing/dropping
 		// us, would pick a different one.
-		case <-time.After(10 * time.Second):
+		case <-uriCheck.C:
 			currentURI := clnt.URI()
 			if currentURI != oldURI {
 				oldURI = currentURI
