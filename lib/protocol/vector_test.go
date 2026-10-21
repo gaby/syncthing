@@ -7,7 +7,10 @@
 package protocol
 
 import (
+	"encoding/binary"
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -385,6 +388,63 @@ func TestCompare(t *testing.T) {
 			if tc.a.LesserEqual(tc.b) {
 				t.Errorf("%+v <= %+v", tc.a, tc.b)
 			}
+		}
+	}
+}
+
+func TestVectorString(t *testing.T) {
+	// The string form is a database key and must match the historical "%x:%d" format.
+	cases := []struct {
+		v        Vector
+		expected string
+	}{
+		{Vector{}, ""},
+		{Vector{Counters: []Counter{{ID: 0, Value: 0}}}, "0000000000000000:0"},
+		{Vector{Counters: []Counter{{ID: 42, Value: 5}}}, "000000000000002a:5"},
+		{
+			Vector{Counters: []Counter{
+				{ID: 42, Value: 5},
+				{ID: ShortID(math.MaxUint64), Value: math.MaxUint64},
+			}},
+			"000000000000002a:5,ffffffffffffffff:18446744073709551615",
+		},
+	}
+	for _, tc := range cases {
+		if s := tc.v.String(); s != tc.expected {
+			t.Errorf("String() => %q, expected %q", s, tc.expected)
+		}
+		if len(tc.v.Counters) == 0 {
+			continue
+		}
+		// Round-trip through VectorFromString
+		parsed, err := VectorFromString(tc.expected)
+		if err != nil {
+			t.Errorf("VectorFromString(%q): %v", tc.expected, err)
+		} else if !parsed.Equal(tc.v) {
+			t.Errorf("VectorFromString(%q) => %+v, expected %+v", tc.expected, parsed, tc.v)
+		}
+	}
+}
+
+func TestVectorStringLong(t *testing.T) {
+	// Covers vectors longer than the initial buffer in String.
+	values := []uint64{0, 9, 10, 1700000000, math.MaxUint32, math.MaxUint64}
+	for n := 0; n <= 16; n++ {
+		var v Vector
+		var ref strings.Builder
+		for i := 0; i < n; i++ {
+			c := Counter{ID: ShortID(uint64(i+1) * 0x0123456789abcdef), Value: values[i%len(values)]}
+			v.Counters = append(v.Counters, c)
+
+			if i > 0 {
+				ref.WriteByte(',')
+			}
+			var idbs [8]byte
+			binary.BigEndian.PutUint64(idbs[:], uint64(c.ID))
+			fmt.Fprintf(&ref, "%x:%d", idbs, c.Value)
+		}
+		if s := v.String(); s != ref.String() {
+			t.Errorf("%d counters: String() => %q, expected %q", n, s, ref.String())
 		}
 	}
 }

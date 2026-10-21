@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -426,6 +427,7 @@ func newCaseCache() *caseCache {
 	}
 }
 
+// realCase expects a canonical name, as returned by Canonicalize.
 func (r *defaultRealCaser) realCase(name string) (string, error) {
 	realName := "."
 	if name == realName {
@@ -435,7 +437,7 @@ func (r *defaultRealCaser) realCase(name string) (string, error) {
 	r.cache.mut.Lock()
 	defer r.cache.mut.Unlock()
 
-	for _, comp := range PathComponents(name) {
+	for comp := range strings.SplitSeq(name, pathSeparatorString) {
 		node := r.cache.getExpireAdd(realName, r.fs)
 
 		if node.err != nil {
@@ -450,7 +452,11 @@ func (r *defaultRealCaser) realCase(name string) (string, error) {
 			}
 		}
 
-		realName = filepath.Join(realName, comp)
+		if realName == "." {
+			realName = comp
+		} else {
+			realName += pathSeparatorString + comp
+		}
 	}
 
 	return realName, nil

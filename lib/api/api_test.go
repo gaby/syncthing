@@ -1829,6 +1829,32 @@ func TestSanitizedHostname(t *testing.T) {
 	}
 }
 
+type writeCountingRecorder struct {
+	*httptest.ResponseRecorder
+	writes int
+}
+
+func (w *writeCountingRecorder) Write(bs []byte) (int, error) {
+	w.writes++
+	return w.ResponseRecorder.Write(bs)
+}
+
+func TestSendJSON(t *testing.T) {
+	w := &writeCountingRecorder{ResponseRecorder: httptest.NewRecorder()}
+	sendJSON(w, map[string]any{"a": 1, "b": []string{"x", "y"}})
+
+	const expected = "{\n  \"a\": 1,\n  \"b\": [\n    \"x\",\n    \"y\"\n  ]\n}\n"
+	if body := w.Body.String(); body != expected {
+		t.Errorf("body is %q, expected %q", body, expected)
+	}
+	if w.writes != 1 {
+		t.Errorf("got %d writes, expected 1", w.writes)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("content type is %q, expected application/json", ct)
+	}
+}
+
 func TestPrometheusMetrics(t *testing.T) {
 	// We should get some form of reasonable metrics response
 	bs := prometheusMetrics()

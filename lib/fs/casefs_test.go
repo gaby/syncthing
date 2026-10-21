@@ -73,6 +73,32 @@ func testRealCase(t *testing.T, fsys Filesystem) {
 	}
 }
 
+func TestRealCaseNonCanonical(t *testing.T) {
+	// Non-canonical names can't match an entry and must fail with ErrNotExist.
+
+	for _, opts := range []string{"", "?insens=true"} {
+		testFs := newCaseFilesystem(newFakeFilesystem(t.Name() + opts))
+		if err := testFs.MkdirAll(filepath.Join("Foo", "bar"), 0o777); err != nil {
+			t.Fatal(err)
+		}
+
+		for _, name := range []string{
+			"Foo//bar",
+			"Foo/",
+			"./Foo",
+			"Foo/./bar",
+			"Foo/../Foo",
+			"../Foo",
+			"/Foo",
+		} {
+			name = filepath.FromSlash(name)
+			if rn, err := testFs.realCase(name); !IsNotExist(err) {
+				t.Errorf("%q%s: got %q, %v, expected ErrNotExist", name, opts, rn, err)
+			}
+		}
+	}
+}
+
 func TestRealCaseSensitive(t *testing.T) {
 	// Verify that realCase returns the best on-disk case for case sensitive
 	// systems. Test is skipped if the underlying fs is insensitive.

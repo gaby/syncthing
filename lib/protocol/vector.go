@@ -26,16 +26,20 @@ type Vector struct {
 }
 
 func (v *Vector) String() string {
-	var buf strings.Builder
+	// A stack buffer, so the string conversion is the only allocation.
+	var arr [128]byte
+	buf := arr[:0]
 	for i, c := range v.Counters {
 		if i > 0 {
-			buf.WriteRune(',')
+			buf = append(buf, ',')
 		}
 		var idbs [8]byte
 		binary.BigEndian.PutUint64(idbs[:], uint64(c.ID))
-		fmt.Fprintf(&buf, "%x:%d", idbs, c.Value)
+		buf = hex.AppendEncode(buf, idbs[:])
+		buf = append(buf, ':')
+		buf = strconv.AppendUint(buf, c.Value, 10)
 	}
-	return buf.String()
+	return string(buf)
 }
 
 func (v *Vector) HumanString() string {

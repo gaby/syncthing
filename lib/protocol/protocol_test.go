@@ -277,11 +277,7 @@ func TestUnmarshalFDPUv16v17(t *testing.T) {
 func TestWriteCompressed(t *testing.T) {
 	for _, random := range []bool{false, true} {
 		buf := new(bytes.Buffer)
-		c := &rawConnection{
-			cr:          &countingReader{Reader: buf},
-			cw:          &countingWriter{Writer: buf},
-			compression: CompressionAlways,
-		}
+		c := newRawConnection(c0ID, buf, buf, testutil.NoopCloser{}, nil, new(mockedConnectionInfo), CompressionAlways)
 
 		msg := (&Response{Data: make([]byte, 10240)}).toWire()
 		if random {
@@ -509,7 +505,7 @@ func TestCheckConsistency(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		err := checkFileInfoConsistency(tc.fi)
+		err := checkFileInfoConsistency(&tc.fi)
 		if tc.ok && err != nil {
 			t.Errorf("Unexpected error %v (want nil) for %v", err, tc.fi)
 		}

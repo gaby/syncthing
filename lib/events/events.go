@@ -340,6 +340,8 @@ func (l *logger) sendEvent(e Event) {
 
 	e.GlobalID = l.nextGlobalID
 
+	var delivered, dropped int
+
 	for i, s := range l.subs {
 		if s.mask&e.Type != 0 {
 			e.SubscriptionID = l.nextSubscriptionIDs[i]
@@ -350,11 +352,11 @@ func (l *logger) sendEvent(e Event) {
 
 			select {
 			case s.events <- e:
-				metricEvents.WithLabelValues(e.Type.String(), metricEventStateDelivered).Inc()
+				delivered++
 			case <-l.timeout.C:
 				// if s.events is not ready, drop the event
 				timedOut = true
-				metricEvents.WithLabelValues(e.Type.String(), metricEventStateDropped).Inc()
+				dropped++
 			}
 
 			// If stop returns false it already sent something to the
@@ -364,6 +366,14 @@ func (l *logger) sendEvent(e Event) {
 				<-l.timeout.C
 			}
 		}
+	}
+
+	// Only touch a counter with something to add, so its series isn't created early.
+	if delivered > 0 {
+		metricEvents.WithLabelValues(e.Type.String(), metricEventStateDelivered).Add(float64(delivered))
+	}
+	if dropped > 0 {
+		metricEvents.WithLabelValues(e.Type.String(), metricEventStateDropped).Add(float64(dropped))
 	}
 }
 
