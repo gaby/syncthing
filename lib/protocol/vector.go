@@ -26,7 +26,7 @@ type Vector struct {
 }
 
 func (v *Vector) String() string {
-	// A stack buffer, so the string conversion is the only allocation.
+	// Typical vectors fit this stack buffer, so the string conversion is the only allocation.
 	var arr [128]byte
 	buf := arr[:0]
 	for i, c := range v.Counters {
