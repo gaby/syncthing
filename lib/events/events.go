@@ -18,10 +18,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/thejerf/suture/v4"
-
 	"github.com/syncthing/syncthing/lib/syncutil"
+	"github.com/thejerf/suture/v4"
 )
 
 type EventType int64
@@ -303,6 +301,7 @@ loop:
 		case e := <-l.events:
 			// Incoming events get sent
 			l.sendEvent(e)
+			metricEvents.WithLabelValues(e.Type.String(), metricEventStateCreated).Inc()
 
 		case fn := <-l.funcs:
 			// Subscriptions are handled here.
@@ -341,13 +340,7 @@ func (l *logger) sendEvent(e Event) {
 
 	e.GlobalID = l.nextGlobalID
 
-	// Resolve the metric counters at most once per event rather than doing
-	// a string conversion and label lookup per subscriber. The delivered
-	// and dropped counters are resolved lazily so their series only exist
-	// once actually incremented.
-	typeStr := e.Type.String()
-	metricEvents.WithLabelValues(typeStr, metricEventStateCreated).Inc()
-	var deliveredCounter, droppedCounter prometheus.Counter
+	var delivered, dropped int
 
 	for i, s := range l.subs {
 		if s.mask&e.Type != 0 {
@@ -359,17 +352,11 @@ func (l *logger) sendEvent(e Event) {
 
 			select {
 			case s.events <- e:
-				if deliveredCounter == nil {
-					deliveredCounter = metricEvents.WithLabelValues(typeStr, metricEventStateDelivered)
-				}
-				deliveredCounter.Inc()
+				delivered++
 			case <-l.timeout.C:
 				// if s.events is not ready, drop the event
 				timedOut = true
-				if droppedCounter == nil {
-					droppedCounter = metricEvents.WithLabelValues(typeStr, metricEventStateDropped)
-				}
-				droppedCounter.Inc()
+				dropped++
 			}
 
 			// If stop returns false it already sent something to the
@@ -379,6 +366,16 @@ func (l *logger) sendEvent(e Event) {
 				<-l.timeout.C
 			}
 		}
+	}
+
+	// Count the outcomes once per event rather than looking up the metric
+	// for every subscriber. A counter is only touched when there is
+	// something to add, so its series doesn't exist before that.
+	if delivered > 0 {
+		metricEvents.WithLabelValues(e.Type.String(), metricEventStateDelivered).Add(float64(delivered))
+	}
+	if dropped > 0 {
+		metricEvents.WithLabelValues(e.Type.String(), metricEventStateDropped).Add(float64(dropped))
 	}
 }
 

@@ -25,22 +25,24 @@ type Vector struct {
 	Counters []Counter
 }
 
+// String returns the machine readable form, "<id as 16 hex digits>:<value>"
+// per counter, comma separated. It is used as a database key.
 func (v *Vector) String() string {
-	var buf strings.Builder
-	buf.Grow(len(v.Counters) * (16 + 1 + 20 + 1))
+	// Build into a stack buffer that fits typical vectors, so the string
+	// conversion is the only allocation and the result is exactly sized.
+	var arr [128]byte
+	buf := arr[:0]
 	for i, c := range v.Counters {
 		if i > 0 {
-			buf.WriteByte(',')
+			buf = append(buf, ',')
 		}
 		var idbs [8]byte
 		binary.BigEndian.PutUint64(idbs[:], uint64(c.ID))
-		var hexbs [16]byte
-		hex.Encode(hexbs[:], idbs[:])
-		buf.Write(hexbs[:])
-		buf.WriteByte(':')
-		buf.WriteString(strconv.FormatUint(c.Value, 10))
+		buf = hex.AppendEncode(buf, idbs[:])
+		buf = append(buf, ':')
+		buf = strconv.AppendUint(buf, c.Value, 10)
 	}
-	return buf.String()
+	return string(buf)
 }
 
 func (v *Vector) HumanString() string {

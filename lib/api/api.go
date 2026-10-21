@@ -213,8 +213,11 @@ func sendJSON(w http.ResponseWriter, jsonObject any) {
 		http.Error(w, string(bs), http.StatusInternalServerError)
 		return
 	}
-	w.Write(bs)
-	io.WriteString(w, "\n")
+	// Write the body and the trailing newline in one go. The newline is
+	// appended in place (MarshalIndent leaves spare capacity), which avoids
+	// copying the whole body through fmt. A failed write means the client
+	// is gone, and there is nothing useful to do about that.
+	_, _ = w.Write(append(bs, '\n'))
 }
 
 func (s *service) Serve(ctx context.Context) error {

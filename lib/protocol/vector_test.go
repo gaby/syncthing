@@ -7,7 +7,10 @@
 package protocol
 
 import (
+	"encoding/binary"
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -420,6 +423,30 @@ func TestVectorString(t *testing.T) {
 			t.Errorf("VectorFromString(%q): %v", tc.expected, err)
 		} else if !parsed.Equal(tc.v) {
 			t.Errorf("VectorFromString(%q) => %+v, expected %+v", tc.expected, parsed, tc.v)
+		}
+	}
+}
+
+func TestVectorStringLong(t *testing.T) {
+	// Vectors longer than what fits in the initial buffer in String must
+	// also match the historical fmt.Sprintf("%x:%d", ...) format exactly.
+	values := []uint64{0, 9, 10, 1700000000, math.MaxUint32, math.MaxUint64}
+	for n := 0; n <= 16; n++ {
+		var v Vector
+		var ref strings.Builder
+		for i := 0; i < n; i++ {
+			c := Counter{ID: ShortID(uint64(i+1) * 0x0123456789abcdef), Value: values[i%len(values)]}
+			v.Counters = append(v.Counters, c)
+
+			if i > 0 {
+				ref.WriteByte(',')
+			}
+			var idbs [8]byte
+			binary.BigEndian.PutUint64(idbs[:], uint64(c.ID))
+			fmt.Fprintf(&ref, "%x:%d", idbs, c.Value)
+		}
+		if s := v.String(); s != ref.String() {
+			t.Errorf("%d counters: String() => %q, expected %q", n, s, ref.String())
 		}
 	}
 }

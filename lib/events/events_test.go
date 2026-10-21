@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const timeout = time.Second
@@ -428,6 +430,85 @@ func TestUnsubscribeContention(t *testing.T) {
 	listenerWg.Wait()
 	if d := time.Since(t0); d > time.Minute {
 		t.Error("It should not take", d, "to unsubscribe from an event stream")
+	}
+}
+
+// eventMetric returns the current value of the events_total counter for the
+// given event type and state, and whether that series exists.
+func eventMetric(t *testing.T, typ EventType, state string) (float64, bool) {
+	t.Helper()
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mf := range mfs {
+		if mf.GetName() != "syncthing_events_total" {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			labels := make(map[string]string)
+			for _, lp := range m.GetLabel() {
+				labels[lp.GetName()] = lp.GetValue()
+			}
+			if labels["event"] == typ.String() && labels["state"] == state {
+				return m.GetCounter().GetValue(), true
+			}
+		}
+	}
+	return 0, false
+}
+
+func TestEventMetrics(t *testing.T) {
+	l, cancel := setupLogger()
+	defer cancel()
+
+	// An event type that no other test logs.
+	const typ = FolderResumed
+
+	created0, _ := eventMetric(t, typ, metricEventStateCreated)
+	delivered0, _ := eventMetric(t, typ, metricEventStateDelivered)
+	dropped0, droppedExisted := eventMetric(t, typ, metricEventStateDropped)
+
+	// Two subscribers that match but never read, so their buffers fill up,
+	// and one that doesn't match and should not be counted at all.
+	l.Subscribe(typ)
+	l.Subscribe(typ)
+	l.Subscribe(StateChanged)
+
+	waitCreated := func(n float64) {
+		t.Helper()
+		for deadline := time.Now().Add(timeout); ; time.Sleep(time.Millisecond) {
+			if v, _ := eventMetric(t, typ, metricEventStateCreated); v-created0 == n {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %v created events", n)
+			}
+		}
+	}
+
+	// Fill the buffers exactly: each event is delivered to both subscribers.
+	for i := 0; i < BufferSize; i++ {
+		l.Log(typ, i)
+	}
+	waitCreated(BufferSize)
+
+	if v, _ := eventMetric(t, typ, metricEventStateDelivered); v-delivered0 != 2*BufferSize {
+		t.Errorf("delivered is %v, expected %v", v-delivered0, 2*BufferSize)
+	}
+	if _, ok := eventMetric(t, typ, metricEventStateDropped); ok != droppedExisted {
+		t.Error("the dropped series should not exist before something is dropped")
+	}
+
+	// The next event doesn't fit in either buffer and is dropped for both.
+	l.Log(typ, "overflow")
+	waitCreated(BufferSize + 1)
+
+	if v, _ := eventMetric(t, typ, metricEventStateDelivered); v-delivered0 != 2*BufferSize {
+		t.Errorf("delivered is %v, expected %v", v-delivered0, 2*BufferSize)
+	}
+	if v, _ := eventMetric(t, typ, metricEventStateDropped); v-dropped0 != 2 {
+		t.Errorf("dropped is %v, expected 2", v-dropped0)
 	}
 }
 
