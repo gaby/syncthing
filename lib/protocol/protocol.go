@@ -171,8 +171,6 @@ type rawConnection struct {
 	startTime time.Time
 	started   chan struct{}
 
-	// Per-device metric counters, resolved once at construction; these are
-	// updated per message so a label lookup per call would be costly.
 	metricRecvMessages          prometheus.Counter
 	metricRecvDecompressedBytes prometheus.Counter
 	metricSentMessages          prometheus.Counter
@@ -249,8 +247,7 @@ func NewConnection(deviceID DeviceID, reader io.Reader, writer io.Writer, closer
 }
 
 func newRawConnection(deviceID DeviceID, reader io.Reader, writer io.Writer, closer io.Closer, receiver rawModel, connInfo ConnectionInfo, compress Compression) *rawConnection {
-	// Resolving each of the per-device metrics here also ensures the
-	// counters exist even when still zero.
+	// Resolving the counters here also makes them exist while still zero.
 	idString := deviceID.String()
 	cr := &countingReader{Reader: reader, metric: metricDeviceRecvBytes.WithLabelValues(idString)}
 	cw := &countingWriter{Writer: writer, metric: metricDeviceSentBytes.WithLabelValues(idString)}

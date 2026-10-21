@@ -427,9 +427,7 @@ func newCaseCache() *caseCache {
 	}
 }
 
-// realCase returns the actual case-resolved form of name, which is expected
-// to be canonical (as produced by Canonicalize). A name with empty or dot
-// components can't match any directory entry and fails with ErrNotExist.
+// realCase expects a canonical name, as returned by Canonicalize.
 func (r *defaultRealCaser) realCase(name string) (string, error) {
 	realName := "."
 	if name == realName {

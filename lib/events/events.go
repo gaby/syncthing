@@ -368,9 +368,7 @@ func (l *logger) sendEvent(e Event) {
 		}
 	}
 
-	// Count the outcomes once per event rather than looking up the metric
-	// for every subscriber. A counter is only touched when there is
-	// something to add, so its series doesn't exist before that.
+	// Only touch a counter with something to add, so its series isn't created early.
 	if delivered > 0 {
 		metricEvents.WithLabelValues(e.Type.String(), metricEventStateDelivered).Add(float64(delivered))
 	}

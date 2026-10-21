@@ -25,11 +25,8 @@ type Vector struct {
 	Counters []Counter
 }
 
-// String returns the machine readable form, "<id as 16 hex digits>:<value>"
-// per counter, comma separated. It is used as a database key.
 func (v *Vector) String() string {
-	// Build into a stack buffer that fits typical vectors, so the string
-	// conversion is the only allocation and the result is exactly sized.
+	// A stack buffer, so the string conversion is the only allocation.
 	var arr [128]byte
 	buf := arr[:0]
 	for i, c := range v.Counters {

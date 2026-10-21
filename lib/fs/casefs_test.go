@@ -74,9 +74,7 @@ func testRealCase(t *testing.T, fsys Filesystem) {
 }
 
 func TestRealCaseNonCanonical(t *testing.T) {
-	// realCase expects canonical names, but names that are not can never
-	// match a directory entry and must fail with ErrNotExist rather than
-	// resolve to some mangled name.
+	// Non-canonical names can't match an entry and must fail with ErrNotExist.
 
 	for _, opts := range []string{"", "?insens=true"} {
 		testFs := newCaseFilesystem(newFakeFilesystem(t.Name() + opts))

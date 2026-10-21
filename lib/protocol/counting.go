@@ -17,9 +17,9 @@ import (
 type countingReader struct {
 	io.Reader
 
-	metric prometheus.Counter // resolved once; Read is too hot for a label lookup
-	tot    atomic.Int64       // bytes
-	last   atomic.Int64       // unix nanos
+	metric prometheus.Counter
+	tot    atomic.Int64 // bytes
+	last   atomic.Int64 // unix nanos
 }
 
 var (
@@ -45,9 +45,9 @@ func (c *countingReader) Last() time.Time {
 type countingWriter struct {
 	io.Writer
 
-	metric prometheus.Counter // resolved once; Write is too hot for a label lookup
-	tot    atomic.Int64       // bytes
-	last   atomic.Int64       // unix nanos
+	metric prometheus.Counter
+	tot    atomic.Int64 // bytes
+	last   atomic.Int64 // unix nanos
 }
 
 func (c *countingWriter) Write(bs []byte) (int, error) {

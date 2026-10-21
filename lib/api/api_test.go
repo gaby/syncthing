@@ -1843,7 +1843,6 @@ func TestSendJSON(t *testing.T) {
 	w := &writeCountingRecorder{ResponseRecorder: httptest.NewRecorder()}
 	sendJSON(w, map[string]any{"a": 1, "b": []string{"x", "y"}})
 
-	// Indented, with exactly one trailing newline, written in one go.
 	const expected = "{\n  \"a\": 1,\n  \"b\": [\n    \"x\",\n    \"y\"\n  ]\n}\n"
 	if body := w.Body.String(); body != expected {
 		t.Errorf("body is %q, expected %q", body, expected)

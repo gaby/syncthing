@@ -393,8 +393,7 @@ func TestCompare(t *testing.T) {
 }
 
 func TestVectorString(t *testing.T) {
-	// The string form is used as a database key and must stay exactly
-	// equivalent to the historical fmt.Sprintf("%x:%d", ...) format.
+	// The string form is a database key and must match the historical "%x:%d" format.
 	cases := []struct {
 		v        Vector
 		expected string
@@ -428,8 +427,7 @@ func TestVectorString(t *testing.T) {
 }
 
 func TestVectorStringLong(t *testing.T) {
-	// Vectors longer than what fits in the initial buffer in String must
-	// also match the historical fmt.Sprintf("%x:%d", ...) format exactly.
+	// Covers vectors longer than the initial buffer in String.
 	values := []uint64{0, 9, 10, 1700000000, math.MaxUint32, math.MaxUint64}
 	for n := 0; n <= 16; n++ {
 		var v Vector

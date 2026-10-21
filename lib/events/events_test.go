@@ -433,8 +433,7 @@ func TestUnsubscribeContention(t *testing.T) {
 	}
 }
 
-// eventMetric returns the current value of the events_total counter for the
-// given event type and state, and whether that series exists.
+// eventMetric returns the events_total counter value and whether its series exists.
 func eventMetric(t *testing.T, typ EventType, state string) (float64, bool) {
 	t.Helper()
 	mfs, err := prometheus.DefaultGatherer.Gather()
@@ -469,8 +468,7 @@ func TestEventMetrics(t *testing.T) {
 	delivered0, _ := eventMetric(t, typ, metricEventStateDelivered)
 	dropped0, droppedExisted := eventMetric(t, typ, metricEventStateDropped)
 
-	// Two subscribers that match but never read, so their buffers fill up,
-	// and one that doesn't match and should not be counted at all.
+	// Two matching subscribers that never read, and one that doesn't match.
 	l.Subscribe(typ)
 	l.Subscribe(typ)
 	l.Subscribe(StateChanged)
@@ -487,7 +485,6 @@ func TestEventMetrics(t *testing.T) {
 		}
 	}
 
-	// Fill the buffers exactly: each event is delivered to both subscribers.
 	for i := 0; i < BufferSize; i++ {
 		l.Log(typ, i)
 	}
